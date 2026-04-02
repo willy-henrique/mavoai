@@ -1,0 +1,48 @@
+{
+  "name": "Connector - API/Webhook -> Cerebro",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "connector-api-ingest",
+        "responseMode": "onReceived"
+      },
+      "id": "webhook_in",
+      "name": "Webhook In",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $json.body || $json;\nconst now = new Date().toISOString();\nreturn [{\n  json: {\n    ticket_id: String(src.ticket_id || src.id || `evt-${Date.now()}`),\n    cliente: String(src.cliente || src.customer?.name || 'Cliente sem nome'),\n    canal: String(src.canal || src.channel || 'outro'),\n    mensagens: String(src.mensagens || src.message || src.description || ''),\n    tecnico: String(src.tecnico || src.agent?.name || 'Integracao API'),\n    data_evento: String(src.data_evento || src.created_at || now),\n    metadata: {\n      sourceSystem: String($env.SOURCE_SYSTEM || 'api'),\n      sourceEntityId: String(src.event_id || src.id || Date.now()),\n      tenantId: String($env.TENANT_ID || 'default'),\n      ingestionId: String(src.ingestion_id || src.event_id || `ing-${Date.now()}`)\n    }\n  }\n}];"
+      },
+      "id": "normalize",
+      "name": "Normalize Canonical",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.CEREBRO_BASE_URL || 'http://127.0.0.1:3100') + '/api/ingestao/willtalk' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}"
+      },
+      "id": "push_cerebro",
+      "name": "Push to Cerebro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4
+    }
+  ],
+  "connections": {
+    "Webhook In": { "main": [[{ "node": "Normalize Canonical", "type": "main", "index": 0 }]] },
+    "Normalize Canonical": { "main": [[{ "node": "Push to Cerebro", "type": "main", "index": 0 }]] }
+  }
+}

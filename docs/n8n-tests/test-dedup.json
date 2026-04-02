@@ -1,0 +1,156 @@
+{
+  "name": "TEST - Cerebro Dedup",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "dedup_trigger",
+      "name": "1. Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Payload com ingestionId FIXO para garantir deduplicacao\nreturn [{\n  json: {\n    ticket_id: 'DEDUP-TEST-FIXO-001',\n    cliente: 'Cliente Dedup Test',\n    canal: 'api',\n    mensagens: 'Problema de rede sem acesso à internet.',\n    tecnico: 'n8n-dedup',\n    metadata: {\n      sourceSystem: 'n8n-dedup-test',\n      sourceEntityId: 'DEDUP-ENTITY-FIXO-001',\n      tenantId: 'dedup-tenant',\n      ingestionId: 'FIXED-INGESTION-ID-DEDUP-001'\n    }\n  }\n}];"
+      },
+      "id": "dedup_payload",
+      "name": "2. Payload com ID Fixo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CEREBRO_BASE_URL }}/api/ingestao/willtalk",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.CEREBRO_INGEST_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": { "timeout": 10000 },
+        "continueOnFail": false
+      },
+      "id": "dedup_first",
+      "name": "3. 1a Ingestao (deve retornar 200)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equal",
+              "value2": "ok"
+            }
+          ]
+        }
+      },
+      "id": "dedup_check_first",
+      "name": "4. 1a Ingestao retornou ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CEREBRO_BASE_URL }}/api/ingestao/willtalk",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.CEREBRO_INGEST_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"ticket_id\": \"DEDUP-TEST-FIXO-001\", \"cliente\": \"Cliente Dedup Test\", \"canal\": \"api\", \"mensagens\": \"Problema de rede sem acesso à internet.\", \"tecnico\": \"n8n-dedup\", \"metadata\": {\"sourceSystem\": \"n8n-dedup-test\", \"sourceEntityId\": \"DEDUP-ENTITY-FIXO-001\", \"tenantId\": \"dedup-tenant\", \"ingestionId\": \"FIXED-INGESTION-ID-DEDUP-001\"}}",
+        "options": { "timeout": 10000 },
+        "continueOnFail": true
+      },
+      "id": "dedup_second",
+      "name": "5. 2a Ingestao DUPLICADA (deve retornar 409)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equal",
+              "value2": "duplicate_ignored"
+            }
+          ]
+        }
+      },
+      "id": "dedup_check_second",
+      "name": "6. 2a Ingestao retornou duplicate_ignored?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1300, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { test: 'DEDUP_PASSED', message: 'Sistema detectou duplicata corretamente', dedup_key: $json.dedupKey ?? 'N/A', timestamp: new Date().toISOString() } }];"
+      },
+      "id": "dedup_pass",
+      "name": "7. PASS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 100]
+    },
+    {
+      "parameters": {
+        "errorMessage": "DEDUP FAILED: Segunda ingestao com mesmo ingestionId nao retornou duplicate_ignored. Verifique a tabela dedup_keys no Supabase."
+      },
+      "id": "dedup_fail",
+      "name": "FAIL - Dedup nao funcionou",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [1520, 320]
+    },
+    {
+      "parameters": {
+        "errorMessage": "DEDUP FAILED: Primeira ingestao nao retornou status ok. Verifique autenticacao e configuracoes do Cerebro."
+      },
+      "id": "dedup_fail_first",
+      "name": "FAIL - 1a ingestao nao funcionou",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [1080, 420]
+    }
+  ],
+  "connections": {
+    "1. Manual Trigger": { "main": [[{ "node": "2. Payload com ID Fixo", "type": "main", "index": 0 }]] },
+    "2. Payload com ID Fixo": { "main": [[{ "node": "3. 1a Ingestao (deve retornar 200)", "type": "main", "index": 0 }]] },
+    "3. 1a Ingestao (deve retornar 200)": { "main": [[{ "node": "4. 1a Ingestao retornou ok?", "type": "main", "index": 0 }]] },
+    "4. 1a Ingestao retornou ok?": {
+      "main": [
+        [{ "node": "5. 2a Ingestao DUPLICADA (deve retornar 409)", "type": "main", "index": 0 }],
+        [{ "node": "FAIL - 1a ingestao nao funcionou", "type": "main", "index": 0 }]
+      ]
+    },
+    "5. 2a Ingestao DUPLICADA (deve retornar 409)": { "main": [[{ "node": "6. 2a Ingestao retornou duplicate_ignored?", "type": "main", "index": 0 }]] },
+    "6. 2a Ingestao retornou duplicate_ignored?": {
+      "main": [
+        [{ "node": "7. PASS", "type": "main", "index": 0 }],
+        [{ "node": "FAIL - Dedup nao funcionou", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": ["teste", "cerebro", "dedup"]
+}

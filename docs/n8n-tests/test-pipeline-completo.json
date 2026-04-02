@@ -1,0 +1,179 @@
+{
+  "name": "TEST - Pipeline Completo (ERP Simulado)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "hours", "hoursInterval": 1 }] }
+      },
+      "id": "pipeline_trigger",
+      "name": "1. Schedule (1h) ou Manual",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CEREBRO_BASE_URL }}/api/health",
+        "options": { "timeout": 8000 },
+        "continueOnFail": false
+      },
+      "id": "pipeline_health",
+      "name": "2. Health Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "notEqual",
+              "value2": "unhealthy"
+            }
+          ]
+        }
+      },
+      "id": "pipeline_check_health",
+      "name": "3. Cerebro Online?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simula ticket de um ERP externo\nconst ts = Date.now();\nconst cenarios = [\n  { problema: 'Impressora termica nao imprime cupom fiscal apos atualizacao do Windows', categoria: 'Impressora' },\n  { problema: 'Computador nao liga apos queda de energia, display mostra erro POST', categoria: 'Hardware' },\n  { problema: 'Usuario nao consegue acessar sistema ERP com credenciais validas', categoria: 'Acesso' },\n  { problema: 'Internet caiu em toda a filial, ping para gateway sem resposta', categoria: 'Rede' },\n  { problema: 'Software de ponto eletronico travando ao registrar entrada dos funcionarios', categoria: 'Software' }\n];\n\nconst cenario = cenarios[Math.floor(Math.random() * cenarios.length)];\n\nreturn [{\n  json: {\n    ticket_erp: {\n      ticket_id: `ERP-${ts}`,\n      cliente: 'Empresa Teste LTDA - Filial Centro',\n      canal: 'erp',\n      mensagens: cenario.problema,\n      tecnico: 'Suporte N1',\n      data_evento: new Date().toISOString(),\n      metadata: {\n        sourceSystem: 'erp-simulado',\n        sourceEntityId: `ERP-ENTITY-${ts}`,\n        tenantId: 'erp-tenant',\n        ingestionId: `ing-erp-${ts}`,\n        tags: [cenario.categoria, 'pipeline-test']\n      }\n    },\n    consulta: cenario.problema\n  }\n}];"
+      },
+      "id": "pipeline_payload",
+      "name": "4. Simular Ticket de ERP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CEREBRO_BASE_URL }}/api/ingestao/v1/events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.CEREBRO_INGEST_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.ticket_erp) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "pipeline_ingest",
+      "name": "5. Ingerir via /api/ingestao/v1/events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 200]
+    },
+    {
+      "parameters": { "amount": 10, "unit": "seconds" },
+      "id": "pipeline_wait",
+      "name": "6. Aguardar Processamento IA (10s)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1300, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CEREBRO_BASE_URL }}/api/query/v1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.CEREBRO_INGEST_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ texto: $('4. Simular Ticket de ERP').item.json.consulta, audience: 'atendente' }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "pipeline_query",
+      "name": "7. Query Unificada /api/query/v1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1520, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.confianca }}",
+              "operation": "notEqual",
+              "value2": "baixa"
+            }
+          ]
+        }
+      },
+      "id": "pipeline_check_quality",
+      "name": "8. Confianca media ou alta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1740, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $json;\nconst ingest = $('5. Ingerir via /api/ingestao/v1/events').item.json;\nreturn [{\n  json: {\n    test: 'PIPELINE_PASSED',\n    atendimento_id: ingest.atendimento_id,\n    confianca: resp.confianca,\n    casos_encontrados: resp.casos?.length ?? 0,\n    resposta_chars: (resp.resposta ?? '').length,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "pipeline_pass",
+      "name": "9. PASS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1960, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log resultado mesmo com confianca baixa (nao falha, apenas registra)\nconst resp = $json;\nreturn [{\n  json: {\n    test: 'PIPELINE_LOW_CONFIDENCE',\n    confianca: resp.confianca,\n    casos_encontrados: resp.casos?.length ?? 0,\n    resposta_chars: (resp.resposta ?? '').length,\n    alerta: 'Confianca baixa - pode ser falta de dados similares no banco. Adicione mais casos via seed.',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "pipeline_low_conf",
+      "name": "9b. Log Confianca Baixa (sem falha)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1960, 320]
+    },
+    {
+      "parameters": {
+        "errorMessage": "PIPELINE FAILED: Health check retornou status unhealthy. Verifique /api/health para detalhes."
+      },
+      "id": "pipeline_fail_health",
+      "name": "ALERTA - Cerebro Unhealthy",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [860, 420]
+    }
+  ],
+  "connections": {
+    "1. Schedule (1h) ou Manual": { "main": [[{ "node": "2. Health Check", "type": "main", "index": 0 }]] },
+    "2. Health Check": { "main": [[{ "node": "3. Cerebro Online?", "type": "main", "index": 0 }]] },
+    "3. Cerebro Online?": {
+      "main": [
+        [{ "node": "4. Simular Ticket de ERP", "type": "main", "index": 0 }],
+        [{ "node": "ALERTA - Cerebro Unhealthy", "type": "main", "index": 0 }]
+      ]
+    },
+    "4. Simular Ticket de ERP": { "main": [[{ "node": "5. Ingerir via /api/ingestao/v1/events", "type": "main", "index": 0 }]] },
+    "5. Ingerir via /api/ingestao/v1/events": { "main": [[{ "node": "6. Aguardar Processamento IA (10s)", "type": "main", "index": 0 }]] },
+    "6. Aguardar Processamento IA (10s)": { "main": [[{ "node": "7. Query Unificada /api/query/v1", "type": "main", "index": 0 }]] },
+    "7. Query Unificada /api/query/v1": { "main": [[{ "node": "8. Confianca media ou alta?", "type": "main", "index": 0 }]] },
+    "8. Confianca media ou alta?": {
+      "main": [
+        [{ "node": "9. PASS", "type": "main", "index": 0 }],
+        [{ "node": "9b. Log Confianca Baixa (sem falha)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": ["teste", "cerebro", "pipeline", "erp"]
+}

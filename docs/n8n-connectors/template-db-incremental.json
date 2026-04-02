@@ -1,0 +1,51 @@
+{
+  "name": "Connector - DB Incremental -> Cerebro",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "minutes", "minutesInterval": 5 }] }
+      },
+      "id": "cron",
+      "name": "Cron",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, customer_name, channel, message, technician, created_at FROM external_tickets WHERE created_at > NOW() - INTERVAL '10 minutes' ORDER BY created_at ASC LIMIT 200;"
+      },
+      "id": "db_query",
+      "name": "DB Query Incremental",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map((item) => {\n  const row = item.json;\n  return {\n    json: {\n      ticket_id: String(row.id),\n      cliente: String(row.customer_name || 'Cliente sem nome'),\n      canal: String(row.channel || 'outro'),\n      mensagens: String(row.message || ''),\n      tecnico: String(row.technician || 'Integracao DB'),\n      data_evento: String(row.created_at || new Date().toISOString()),\n      metadata: {\n        sourceSystem: String($env.SOURCE_SYSTEM || 'db'),\n        sourceEntityId: String(row.id),\n        tenantId: String($env.TENANT_ID || 'default'),\n        ingestionId: `db-${row.id}-${Date.now()}`\n      }\n    }\n  };\n});"
+      },
+      "id": "normalize",
+      "name": "Normalize Canonical",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.CEREBRO_BASE_URL || 'http://127.0.0.1:3100') + '/api/ingestao/willtalk' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}"
+      },
+      "id": "push_cerebro",
+      "name": "Push to Cerebro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4
+    }
+  ],
+  "connections": {
+    "Cron": { "main": [[{ "node": "DB Query Incremental", "type": "main", "index": 0 }]] },
+    "DB Query Incremental": { "main": [[{ "node": "Normalize Canonical", "type": "main", "index": 0 }]] },
+    "Normalize Canonical": { "main": [[{ "node": "Push to Cerebro", "type": "main", "index": 0 }]] }
+  }
+}

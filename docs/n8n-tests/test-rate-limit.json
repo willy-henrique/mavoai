@@ -1,0 +1,108 @@
+{
+  "name": "TEST - Cerebro Rate Limit",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "rl_trigger",
+      "name": "1. Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gera 125 itens com ticket_ids unicos\nconst items = [];\nfor (let i = 0; i < 125; i++) {\n  items.push({\n    json: {\n      index: i,\n      payload: {\n        ticket_id: `RATELIMIT-${Date.now()}-${i}`,\n        cliente: `Cliente Rate Test ${i}`,\n        canal: 'api',\n        mensagens: `Mensagem de teste rate limit numero ${i}`,\n        tecnico: 'n8n-rl-test',\n        metadata: {\n          sourceSystem: 'n8n-rate-test',\n          sourceEntityId: `RL-ENTITY-${Date.now()}-${i}`,\n          tenantId: 'rl-tenant',\n          ingestionId: `ing-rl-${Date.now()}-${i}`\n        }\n      }\n    }\n  });\n}\nreturn items;"
+      },
+      "id": "rl_items",
+      "name": "2. Gerar 125 Itens de Teste",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CEREBRO_BASE_URL }}/api/ingestao/willtalk",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.CEREBRO_INGEST_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": { "timeout": 8000 },
+        "continueOnFail": true
+      },
+      "id": "rl_request",
+      "name": "3. HTTP Request (continua em falha)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Agrega resultados e conta 429s\nconst all = $input.all();\nconst total = all.length;\nconst ok200 = all.filter(i => !i.json.error && i.json.status === 'ok').length;\nconst dup409 = all.filter(i => i.json.status === 'duplicate_ignored').length;\nconst rl429 = all.filter(i => i.json.error === 'rate_limit_exceeded').length;\nconst outros = total - ok200 - dup409 - rl429;\n\nreturn [{\n  json: {\n    total,\n    ok_200: ok200,\n    duplicate_409: dup409,\n    rate_limited_429: rl429,\n    outros,\n    rate_limit_ativado: rl429 >= 5,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "rl_aggregate",
+      "name": "4. Agregar Resultados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.rate_limit_ativado }}",
+              "operation": "true"
+            }
+          ]
+        }
+      },
+      "id": "rl_check",
+      "name": "5. Rate Limit Ativou?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { test: 'RATE_LIMIT_PASSED', summary: $json, message: `Rate limit ativou corretamente: ${$json.rate_limited_429} requisicoes bloqueadas de ${$json.total}`, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "rl_pass",
+      "name": "6. PASS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 200]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=RATE LIMIT FAILED: Apenas {{ $json.rate_limited_429 }} de {{ $json.total }} requests foram bloqueados (esperado >= 5). Verifique INTEGRATION_RATE_LIMIT_PER_MIN e a configuracao do Upstash Redis."
+      },
+      "id": "rl_fail",
+      "name": "FAIL - Rate Limit nao ativou",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [1300, 420]
+    }
+  ],
+  "connections": {
+    "1. Manual Trigger": { "main": [[{ "node": "2. Gerar 125 Itens de Teste", "type": "main", "index": 0 }]] },
+    "2. Gerar 125 Itens de Teste": { "main": [[{ "node": "3. HTTP Request (continua em falha)", "type": "main", "index": 0 }]] },
+    "3. HTTP Request (continua em falha)": { "main": [[{ "node": "4. Agregar Resultados", "type": "main", "index": 0 }]] },
+    "4. Agregar Resultados": { "main": [[{ "node": "5. Rate Limit Ativou?", "type": "main", "index": 0 }]] },
+    "5. Rate Limit Ativou?": {
+      "main": [
+        [{ "node": "6. PASS", "type": "main", "index": 0 }],
+        [{ "node": "FAIL - Rate Limit nao ativou", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": ["teste", "cerebro", "rate-limit"]
+}

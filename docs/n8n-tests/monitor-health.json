@@ -1,0 +1,148 @@
+{
+  "name": "Monitor - Cerebro Health (5min)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "monitor_trigger",
+      "name": "1. Schedule (a cada 5 minutos)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CEREBRO_BASE_URL }}/api/health",
+        "options": {
+          "timeout": 10000,
+          "response": { "response": { "neverError": true } }
+        },
+        "continueOnFail": true
+      },
+      "id": "monitor_health",
+      "name": "2. GET /api/health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CEREBRO_BASE_URL }}/api/metricas",
+        "options": { "timeout": 10000, "response": { "response": { "neverError": true } } },
+        "continueOnFail": true
+      },
+      "id": "monitor_metricas",
+      "name": "3. GET /api/metricas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const health = $('2. GET /api/health').item.json;\nconst metricas = $('3. GET /api/metricas').item.json;\n\nconst alertas = [];\n\n// 1. Status geral\nif (!health.checks?.supabase?.ok) {\n  alertas.push({ nivel: 'CRITICO', tipo: 'supabase_offline', mensagem: 'Supabase está offline. Nenhuma ingestão possível.' });\n}\n\nif (!health.checks?.ai_chat?.ok) {\n  alertas.push({ nivel: 'CRITICO', tipo: 'ai_chat_offline', mensagem: `Provedor de IA (${health.checks?.ai_chat?.provider}) está inacessível. Respostas assistidas paradas.` });\n}\n\nif (health.checks?.embedding?.ok === false) {\n  alertas.push({ nivel: 'AVISO', tipo: 'embedding_offline', mensagem: `Embeddings indisponíveis (${health.checks?.embedding?.provider}). Busca vetorial desativada, usando fallback textual.` });\n}\n\nif (health.checks?.pgvector_rpc?.ok === false) {\n  alertas.push({ nivel: 'AVISO', tipo: 'pgvector_rpc_ausente', mensagem: 'Função buscar_atendimentos_semanticos não encontrada. Execute a migration 002_upgrade_semantic_search.sql.' });\n}\n\n// 2. Cobertura de embeddings\nconst coverage = health.checks?.embedding_coverage?.pct;\nif (coverage !== null && coverage !== undefined && coverage < 0.7) {\n  alertas.push({ nivel: 'AVISO', tipo: 'embedding_coverage_baixo', mensagem: `Apenas ${Math.round(coverage * 100)}% dos atendimentos processados têm embedding. Execute scripts/backfill-embeddings.ts.` });\n}\n\n// 3. Backlog de processamento\nconst backlog = metricas.saude?.pendentes_acumulados ?? 0;\nif (backlog > 20) {\n  alertas.push({ nivel: 'AVISO', tipo: 'backlog_processamento', mensagem: `${backlog} atendimentos aguardam processamento há mais de 5 minutos. Verifique a fila.` });\n}\n\n// 4. Erros de auditoria\nconst auditErrors = metricas.saude?.audit_errors_24h ?? 0;\nif (auditErrors > 10) {\n  alertas.push({ nivel: 'AVISO', tipo: 'muitos_erros_auditoria', mensagem: `${auditErrors} erros registrados nas últimas 24h em audit_events.` });\n}\n\n// 5. Latência alta\nconst supabaseLatency = health.checks?.supabase?.latency_ms ?? 0;\nif (supabaseLatency > 2000) {\n  alertas.push({ nivel: 'AVISO', tipo: 'latencia_supabase_alta', mensagem: `Latência do Supabase: ${supabaseLatency}ms (limite: 2000ms).` });\n}\n\nconst saudavel = alertas.length === 0;\nconst temCritico = alertas.some(a => a.nivel === 'CRITICO');\n\nreturn [{\n  json: {\n    saudavel,\n    tem_critico: temCritico,\n    total_alertas: alertas.length,\n    alertas,\n    status: health.status ?? 'inacessivel',\n    embedding_coverage_pct: coverage !== null && coverage !== undefined ? Math.round(coverage * 100) : null,\n    backlog: backlog,\n    audit_errors_24h: auditErrors,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "monitor_analisar",
+      "name": "4. Analisar e Gerar Alertas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.saudavel }}",
+              "operation": "false"
+            }
+          ]
+        }
+      },
+      "id": "monitor_check",
+      "name": "5. Há Alertas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Formatar mensagem de alerta legível\nconst d = $json;\nconst linhas = [\n  `🚨 ALERTA CÉREBRO — ${d.timestamp}`,\n  `Status: ${d.status.toUpperCase()}`,\n  `Alertas: ${d.total_alertas} | Críticos: ${d.tem_critico ? 'SIM' : 'Não'}`,\n  '',\n  ...d.alertas.map(a => `${a.nivel === 'CRITICO' ? '🔴' : '🟡'} [${a.nivel}] ${a.mensagem}`),\n  '',\n  `Embedding coverage: ${d.embedding_coverage_pct !== null ? d.embedding_coverage_pct + '%' : 'N/A'}`,\n  `Backlog: ${d.backlog} tickets`,\n  `Erros 24h: ${d.audit_errors_24h}`,\n];\n\nreturn [{ json: { ...d, mensagem_formatada: linhas.join('\\n') } }];"
+      },
+      "id": "monitor_formatar",
+      "name": "6. Formatar Mensagem de Alerta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERTA_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.mensagem_formatada, alertas: $json.alertas, status: $json.status, timestamp: $json.timestamp }) }}",
+        "options": { "timeout": 10000 },
+        "continueOnFail": true
+      },
+      "id": "monitor_notificar",
+      "name": "7. Enviar Notificação (Webhook)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1520, 200],
+      "notes": "Configure ALERTA_WEBHOOK_URL no n8n com sua URL de notificação:\n- Slack: Incoming Webhook URL\n- Discord: Webhook URL\n- WhatsApp via WillTalk: URL do webhook de reply\n- Qualquer HTTP receiver"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { status: 'ok', mensagem: 'Cerebro saudavel', timestamp: new Date().toISOString() } }];"
+      },
+      "id": "monitor_ok",
+      "name": "8. Log OK (sem alertas)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 420]
+    }
+  ],
+  "connections": {
+    "1. Schedule (a cada 5 minutos)": { "main": [[{ "node": "2. GET /api/health", "type": "main", "index": 0 }]] },
+    "2. GET /api/health": { "main": [[{ "node": "3. GET /api/metricas", "type": "main", "index": 0 }]] },
+    "3. GET /api/metricas": { "main": [[{ "node": "4. Analisar e Gerar Alertas", "type": "main", "index": 0 }]] },
+    "4. Analisar e Gerar Alertas": { "main": [[{ "node": "5. Há Alertas?", "type": "main", "index": 0 }]] },
+    "5. Há Alertas?": {
+      "main": [
+        [{ "node": "6. Formatar Mensagem de Alerta", "type": "main", "index": 0 }],
+        [{ "node": "8. Log OK (sem alertas)", "type": "main", "index": 0 }]
+      ]
+    },
+    "6. Formatar Mensagem de Alerta": { "main": [[{ "node": "7. Enviar Notificação (Webhook)", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true, "saveDataSuccessExecution": "none" },
+  "tags": ["monitor", "cerebro", "observabilidade"],
+  "_instrucoes": {
+    "variaveis_ambiente_n8n": {
+      "CEREBRO_BASE_URL": "http://localhost:3000 (ou URL Vercel)",
+      "ALERTA_WEBHOOK_URL": "URL do seu canal de notificação (Slack, Discord, WhatsApp, etc.)"
+    },
+    "alertas_monitorados": [
+      "supabase_offline — Supabase inacessível (CRÍTICO)",
+      "ai_chat_offline — Provedor de IA inacessível (CRÍTICO)",
+      "embedding_offline — Endpoint de embeddings fora (AVISO)",
+      "pgvector_rpc_ausente — Função RPC não instalada (AVISO)",
+      "embedding_coverage_baixo — Menos de 70% dos tickets com embedding (AVISO)",
+      "backlog_processamento — Mais de 20 tickets parados há 5min+ (AVISO)",
+      "muitos_erros_auditoria — Mais de 10 erros em 24h (AVISO)",
+      "latencia_supabase_alta — Latência > 2000ms (AVISO)"
+    ]
+  }
+}

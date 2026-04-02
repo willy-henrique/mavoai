@@ -1,0 +1,29 @@
+{
+  "name": "@cerebro/client",
+  "version": "1.0.0",
+  "description": "SDK TypeScript para integrar com o Cérebro Operacional",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["cerebro", "suporte", "IA", "RAG", "embeddings", "sdk"],
+  "license": "MIT",
+  "private": true,
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.2"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "framework": "nextjs",
+  "functions": {
+    "app/api/resposta-assistida/route.ts": { "maxDuration": 60 },
+    "app/api/atendimentos/processar/route.ts": { "maxDuration": 60 },
+    "app/api/busca-semantica/route.ts": { "maxDuration": 30 }
+  }
+}
