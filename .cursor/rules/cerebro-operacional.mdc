@@ -1,0 +1,63 @@
+---
+description: Arquitetura e regras do Cérebro Operacional — sistema de inteligência para suporte
+alwaysApply: true
+---
+
+# Cérebro Operacional
+
+Sistema de inteligência operacional para tickets de suporte. Processa tickets com IA, armazena embeddings vetoriais e gera respostas assistidas via RAG.
+
+## Arquitetura
+
+```
+WillTalk (WhatsApp) → ticket-upsert (triagem) → [após triagem] → Cérebro
+                                                                    ├─ /api/ingestao/willtalk (salvar ticket)
+                                                                    ├─ /api/resposta-assistida (gerar resposta IA)
+                                                                    └─ /api/busca-semantica (buscar casos similares)
+```
+
+O Cérebro só é acionado DEPOIS que a triagem no WillTalk está completa (`triageCompleted === true`).
+
+## Stack
+
+- **Framework**: Next.js (App Router), TypeScript, React, Tailwind, SWR
+- **Banco**: Supabase (PostgreSQL + pgvector)
+- **IA Chat**: Groq (`openai/gpt-oss-120b`) via Vercel AI SDK
+- **IA Embeddings**: OpenAI (`text-embedding-3-small`) — opcional
+- **Validação**: Zod
+
+## APIs
+
+| Endpoint | Função |
+|----------|--------|
+| `POST /api/ingestao/willtalk` | Recebe ticket do WillTalk, salva e processa com IA |
+| `POST /api/resposta-assistida` | Gera resposta sugerida via RAG (busca semântica + LLM) |
+| `POST /api/busca-semantica` | Busca tickets similares por embedding vetorial |
+| `POST /api/atendimentos` | CRUD de atendimentos |
+| `POST /api/atendimentos/processar` | Extração estruturada via IA |
+
+## Arquivos-chave
+
+- `lib/ai-provider.ts` — Configuração de providers (Groq chat, OpenAI embeddings)
+- `lib/embeddings.ts` — Geração de embeddings
+- `lib/semantic-search.ts` — Busca semântica com fallback textual
+- `lib/assisted-response.ts` — Geração de resposta assistida (RAG)
+- `scripts/002_upgrade_semantic_search.sql` — Schema vetorial
+
+## Integração com WillTalk
+
+- WillTalk faz a triagem (menu → fila → SLA)
+- Após triagem completa, n8n (opcional) ou chamada direta envia dados ao Cérebro
+- Cérebro processa e disponibiliza resposta IA no painel
+- Resposta IA é para consulta do atendente, NÃO envio automático ao cliente
+
+## Variáveis de Ambiente
+
+```env
+AI_API_KEY=<groq_api_key>
+AI_BASE_URL=https://api.groq.com/openai/v1
+AI_CHAT_MODEL=openai/gpt-oss-120b
+EMBEDDING_API_KEY=<openai_api_key>  # opcional
+SUPABASE_URL=<url>
+SUPABASE_SERVICE_KEY=<key>
+```

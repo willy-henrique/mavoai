@@ -1,0 +1,87 @@
+{
+  "name": "willtalk_ingestao_mvp",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "willtalk-ingestao",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook_willtalk",
+      "name": "Webhook WillTalk",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $json;\n\nfunction toText(value) {\n  if (value == null) return \"\";\n  if (typeof value === \"string\") return value;\n  if (Array.isArray(value)) return value.map(v => toText(v)).join(\"\\n\");\n  return String(value);\n}\n\nconst mergedMessages = toText(\n  src.mensagens ||\n  src.messages ||\n  src.conversa ||\n  src.message?.text ||\n  \"\"\n)\n  .replace(/\\s+/g, \" \")\n  .trim();\n\nconst out = {\n  ticket_id: src.ticket_id || src.ticket?.id || src.conversation_id || `WT-${Date.now()}`,\n  cliente:\n    src.cliente ||\n    src.contact?.name ||\n    src.contact?.phoneNumber ||\n    src.customer?.name ||\n    \"Cliente sem nome\",\n  mensagens: mergedMessages || \"[sem mensagens relevantes]\",\n  data_evento: src.data_evento || src.timestamp || new Date().toISOString(),\n  canal:\n    src.canal ||\n    (src.contact?.phoneNumber ? \"whatsapp\" : \"telefone\"),\n  tecnico: src.tecnico || src.ticket?.assignee?.name || \"\"\n};\n\nconst eventName = src.event || src.event_type || \"evt\";\nout.idempotency_key = `${out.ticket_id}:${eventName}:${out.data_evento}`;\n\nreturn [{ json: out }];"
+      },
+      "id": "normalizar_payload",
+      "name": "Normalizar Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/api/ingestao/willtalk",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "id": "enviar_para_api",
+      "name": "Enviar para API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        790,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook WillTalk": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Payload": {
+      "main": [
+        [
+          {
+            "node": "Enviar para API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1"
+}

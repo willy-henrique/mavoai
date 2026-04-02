@@ -1,0 +1,186 @@
+{
+  "name": "TEST - Cerebro Smoke",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "smoke_trigger",
+      "name": "1. Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ts = Date.now();\nreturn [{\n  json: {\n    ticket_id: `SMOKE-TEST-${ts}`,\n    cliente: 'Cliente Smoke Test',\n    canal: 'api',\n    mensagens: 'Impressora termica nao imprime cupom fiscal apos reinicio do servidor. Erro 0x0000005A.',\n    tecnico: 'n8n-smoke',\n    data_evento: new Date().toISOString(),\n    metadata: {\n      sourceSystem: 'n8n-smoke-test',\n      sourceEntityId: `SMOKE-ENTITY-${ts}`,\n      tenantId: 'smoke-tenant',\n      ingestionId: `ing-smoke-${ts}`\n    }\n  }\n}];"
+      },
+      "id": "smoke_payload",
+      "name": "2. Montar Payload de Teste",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CEREBRO_BASE_URL }}/api/ingestao/willtalk",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.CEREBRO_INGEST_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "smoke_ingest",
+      "name": "3. POST Ingestao",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": { "amount": 6, "unit": "seconds" },
+      "id": "smoke_wait",
+      "name": "4. Aguardar Processamento IA (6s)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CEREBRO_BASE_URL }}/api/busca-semantica",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.CEREBRO_INGEST_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"texto\": \"impressora nao imprime cupom fiscal\"}",
+        "options": { "timeout": 20000 }
+      },
+      "id": "smoke_search",
+      "name": "5. POST Busca Semantica",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.resultados?.length ?? 0 }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "smoke_check_search",
+      "name": "6. Verificar Resultados Busca",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CEREBRO_BASE_URL }}/api/resposta-assistida?debug=true",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.CEREBRO_INGEST_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"texto\": \"impressora termica nao imprime cupom fiscal\"}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "smoke_response",
+      "name": "7. POST Resposta Assistida",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1520, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ ($json.resposta_sugerida ?? '').length }}",
+              "operation": "larger",
+              "value2": 100
+            }
+          ]
+        }
+      },
+      "id": "smoke_check_response",
+      "name": "8. Verificar Qualidade Resposta",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1740, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { test: 'SMOKE_PASSED', confianca: $json.confianca, cases_utilizados: $json.cases_utilizados?.length ?? 0, resposta_chars: ($json.resposta_sugerida ?? '').length, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "smoke_pass",
+      "name": "9. PASS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1960, 200]
+    },
+    {
+      "parameters": {
+        "errorMessage": "SMOKE FAILED: Resposta com menos de 100 caracteres ou busca retornou 0 resultados."
+      },
+      "id": "smoke_fail_response",
+      "name": "FAIL - Resposta insuficiente",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [1960, 420]
+    },
+    {
+      "parameters": {
+        "errorMessage": "SMOKE FAILED: Busca semantica retornou 0 resultados. Verifique embeddings e seed de dados."
+      },
+      "id": "smoke_fail_search",
+      "name": "FAIL - Busca sem resultados",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [1300, 500]
+    }
+  ],
+  "connections": {
+    "1. Manual Trigger": { "main": [[{ "node": "2. Montar Payload de Teste", "type": "main", "index": 0 }]] },
+    "2. Montar Payload de Teste": { "main": [[{ "node": "3. POST Ingestao", "type": "main", "index": 0 }]] },
+    "3. POST Ingestao": { "main": [[{ "node": "4. Aguardar Processamento IA (6s)", "type": "main", "index": 0 }]] },
+    "4. Aguardar Processamento IA (6s)": { "main": [[{ "node": "5. POST Busca Semantica", "type": "main", "index": 0 }]] },
+    "5. POST Busca Semantica": { "main": [[{ "node": "6. Verificar Resultados Busca", "type": "main", "index": 0 }]] },
+    "6. Verificar Resultados Busca": {
+      "main": [
+        [{ "node": "7. POST Resposta Assistida", "type": "main", "index": 0 }],
+        [{ "node": "FAIL - Busca sem resultados", "type": "main", "index": 0 }]
+      ]
+    },
+    "7. POST Resposta Assistida": { "main": [[{ "node": "8. Verificar Qualidade Resposta", "type": "main", "index": 0 }]] },
+    "8. Verificar Qualidade Resposta": {
+      "main": [
+        [{ "node": "9. PASS", "type": "main", "index": 0 }],
+        [{ "node": "FAIL - Resposta insuficiente", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": ["teste", "cerebro", "smoke"]
+}

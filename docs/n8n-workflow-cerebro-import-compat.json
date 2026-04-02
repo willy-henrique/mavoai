@@ -1,0 +1,87 @@
+{
+  "name": "cerebro_import_compat",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "willtalk-ingestao",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook_willtalk",
+      "name": "Webhook WillTalk",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $json;\n\nfunction toText(value) {\n  if (value == null) return \"\";\n  if (typeof value === \"string\") return value;\n  if (Array.isArray(value)) return value.map((v) => toText(v)).join(\"\\n\");\n  return String(value);\n}\n\nconst mensagens = toText(\n  src.mensagens ||\n  src.messages ||\n  src.conversa ||\n  src.message?.text ||\n  src.body ||\n  \"\"\n).replace(/\\s+/g, \" \").trim();\n\nreturn [{\n  json: {\n    ticket_id: src.ticket_id || src.ticket?.id || src.conversation_id || `WT-${Date.now()}`,\n    cliente: src.cliente || src.contact?.name || src.contact?.phoneNumber || src.customer?.name || \"Cliente sem nome\",\n    canal: src.canal || src.channel || (src.contact?.phoneNumber ? \"whatsapp\" : \"telefone\"),\n    tecnico: src.tecnico || src.ticket?.assignee?.name || \"\",\n    data_evento: src.data_evento || src.timestamp || new Date().toISOString(),\n    mensagens: mensagens || \"[sem mensagens relevantes]\"\n  }\n}];"
+      },
+      "id": "normalizar_payload",
+      "name": "Normalizar Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/api/ingestao/willtalk",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "enviar_para_cerebro",
+      "name": "Enviar para Cerebro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook WillTalk": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Payload": {
+      "main": [
+        [
+          {
+            "node": "Enviar para Cerebro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1"
+}
