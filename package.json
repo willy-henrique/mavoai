@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "verify:stack": "node scripts/verify-stack.mjs",
+    "example:groq-sdk": "python scripts/groq_sdk_example.py"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.0",
@@ -44,6 +46,7 @@
     "@radix-ui/react-tooltip": "1.2.8",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.1",
+    "@types/pg": "^8.20.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.37.0",
     "@vercel/analytics": "1.6.1",
@@ -58,6 +61,7 @@
     "lucide-react": "^0.564.0",
     "next": "16.2.0",
     "next-themes": "^0.4.6",
+    "pg": "^8.20.0",
     "react": "19.2.4",
     "react-day-picker": "9.13.2",
     "react-dom": "19.2.4",

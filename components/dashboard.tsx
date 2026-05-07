@@ -33,6 +33,7 @@ import {
   Cpu,
   Database,
 } from "lucide-react"
+import { GroqMotorStrip } from "@/components/groq-motor-strip"
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json())
 
@@ -53,7 +54,18 @@ interface IngestaoLog {
 }
 
 interface HealthStatus {
-  supabase: boolean
+  postgres?: boolean
+  checks?: {
+    postgres?: {
+      ok?: boolean
+    }
+    ai_chat?: {
+      ok?: boolean
+      provider?: string
+      model?: string
+    }
+  }
+  supabase?: boolean
   groq: boolean
   embedding: boolean
 }
@@ -66,6 +78,8 @@ export function Dashboard() {
   const { data: health } = useSWR<HealthStatus>("/api/health", fetcher, {
     refreshInterval: 60000,
   })
+  const postgresHealthOk =
+    health?.checks?.postgres?.ok ?? health?.postgres ?? health?.supabase ?? false
 
   if (isLoading) {
     return (
@@ -83,51 +97,66 @@ export function Dashboard() {
     )
   }
 
-  const supabaseOnline = data?.supabaseOnline !== false
+  const postgresOnline = data?.supabaseOnline !== false
 
   return (
     <div className="flex flex-col gap-6">
-      {!supabaseOnline && (
+      {!postgresOnline && (
         <div className="flex items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
           <AlertTriangle className="h-5 w-5 shrink-0" />
           <div>
             <p className="font-medium">Banco de dados indisponivel</p>
             <p className="text-sm opacity-80">
-              Supabase fora do ar — dados podem estar desatualizados.
+              PostgreSQL fora do ar - dados podem estar desatualizados.
             </p>
           </div>
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted-foreground mr-1">Status:</span>
-        <Badge
-          variant={health?.supabase ? "default" : "destructive"}
-          className="text-xs gap-1"
-        >
-          <Database className="h-3 w-3" />
-          Supabase {health?.supabase ? "OK" : "OFF"}
-        </Badge>
-        <Badge
-          variant={health?.groq ? "default" : "secondary"}
-          className="text-xs gap-1"
-        >
-          <Cpu className="h-3 w-3" />
-          Groq {health?.groq ? "OK" : "N/A"}
-        </Badge>
-        <Badge
-          variant={
-            health?.embedding ? "default" : "secondary"
-          }
-          className="text-xs gap-1"
-        >
-          <Activity className="h-3 w-3" />
-          Embedding {health?.embedding ? "OK" : "OFF"}
-        </Badge>
-        {data?.ultimaAtualizacao && (
-          <span className="ml-auto text-xs text-muted-foreground">
-            Atualizado: {new Date(data.ultimaAtualizacao).toLocaleTimeString("pt-BR")}
-          </span>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Serviços:</span>
+          {[
+            { ok: postgresHealthOk, icon: Database, label: "PostgreSQL" },
+            {
+              ok: !!health?.groq,
+              icon: Cpu,
+              label:
+                health?.checks?.ai_chat?.provider === "groq"
+                  ? "Groq (chat + visão)"
+                  : health?.checks?.ai_chat?.provider === "xai"
+                    ? "xAI Chat"
+                    : "Chat IA",
+            },
+            { ok: !!health?.embedding, icon: Activity, label: "Embedding" },
+          ].map(({ ok, icon: Icon, label }) => (
+            <span
+              key={label}
+              title={
+                health?.checks?.ai_chat?.provider === "groq" &&
+                label.startsWith("Groq")
+                  ? `${health.checks.ai_chat.model ?? "Groq"} — conversação e análise de imagens`
+                  : undefined
+              }
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${
+                ok
+                  ? "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-800"
+                  : "bg-muted text-muted-foreground ring-border"
+              }`}
+            >
+              <Icon className="h-3 w-3" />
+              {label} {ok ? "OK" : "OFF"}
+            </span>
+          ))}
+          {data?.ultimaAtualizacao && (
+            <span className="text-xs text-muted-foreground sm:ml-auto">
+              Atualizado:{" "}
+              {new Date(data.ultimaAtualizacao).toLocaleTimeString("pt-BR")}
+            </span>
+          )}
+        </div>
+        {health?.checks?.ai_chat?.provider === "groq" && (
+          <GroqMotorStrip variant="subtle" className="sm:pl-1" />
         )}
       </div>
 
@@ -223,7 +252,7 @@ export function Dashboard() {
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+              <div className="flex h-75 items-center justify-center text-muted-foreground">
                 Sem dados para exibir
               </div>
             )}
@@ -240,24 +269,32 @@ export function Dashboard() {
           <CardContent>
             {data?.porTecnico?.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={data.porTecnico} layout="vertical">
-                  <XAxis type="number" />
+                <BarChart
+                  data={data.porTecnico}
+                  layout="vertical"
+                  margin={{ right: 24, left: 0 }}
+                >
+                  <XAxis type="number" allowDataOverflow={false} />
                   <YAxis
                     dataKey="nome"
                     type="category"
-                    width={100}
+                    width={110}
                     tick={{ fontSize: 12 }}
+                    tickFormatter={(v: string) =>
+                      v.length > 14 ? `${v.slice(0, 14)}…` : v
+                    }
                   />
                   <Tooltip />
                   <Bar
                     dataKey="total"
                     fill="hsl(var(--chart-1))"
                     radius={4}
+                    maxBarSize={28}
                   />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+              <div className="flex h-75 items-center justify-center text-muted-foreground">
                 Sem dados para exibir
               </div>
             )}
@@ -287,7 +324,7 @@ export function Dashboard() {
               </LineChart>
             </ResponsiveContainer>
           ) : (
-            <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+            <div className="flex h-75 items-center justify-center text-muted-foreground">
               Sem dados para exibir
             </div>
           )}
@@ -304,36 +341,39 @@ export function Dashboard() {
         </CardHeader>
         <CardContent>
           {data?.ultimasIngestoes?.length > 0 ? (
-            <div className="space-y-3">
-              {data.ultimasIngestoes.map((log: IngestaoLog) => (
-                <div
-                  key={log.id}
-                  className="flex items-center justify-between rounded-lg border p-3 text-sm"
-                >
-                  <div className="flex items-center gap-3">
-                    <Badge
-                      variant={
-                        log.status === "sucesso"
-                          ? "default"
-                          : log.status.startsWith("erro")
-                            ? "destructive"
-                            : "secondary"
-                      }
-                      className="text-xs"
-                    >
-                      {log.status}
-                    </Badge>
-                    <span className="text-muted-foreground">{log.origem}</span>
+            <div className="flex flex-col divide-y">
+              {data.ultimasIngestoes.map((log: IngestaoLog) => {
+                const isSucesso = log.status === "sucesso"
+                const isErro = log.status.startsWith("erro")
+                return (
+                  <div
+                    key={log.id}
+                    className="flex items-center justify-between py-3 first:pt-0 last:pb-0 text-sm"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 shrink-0 ${
+                          isSucesso
+                            ? "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-800"
+                            : isErro
+                              ? "bg-red-50 text-red-700 ring-red-200 dark:bg-red-950 dark:text-red-300 dark:ring-red-800"
+                              : "bg-muted text-muted-foreground ring-border"
+                        }`}
+                      >
+                        {log.status}
+                      </span>
+                      <span className="text-muted-foreground truncate">{log.origem}</span>
+                    </div>
+                    <span className="text-xs text-muted-foreground shrink-0 ml-2">
+                      {new Date(log.created_at).toLocaleString("pt-BR")}
+                    </span>
                   </div>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(log.created_at).toLocaleString("pt-BR")}
-                  </span>
-                </div>
-              ))}
+                )
+              })}
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Nenhuma ingestao registrada
+              Nenhuma ingestão registrada
             </p>
           )}
         </CardContent>

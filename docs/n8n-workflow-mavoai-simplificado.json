@@ -1,0 +1,163 @@
+{
+  "name": "MAVOAI_Ingestao_Simplificada",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mavoai-ingest",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook_mavoai",
+      "name": "Webhook MAVO.AI",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalização simplificada para MAVO.AI\nconst payload = $json;\n\n// Extrair dados básicos\nconst ticketId = payload.ticket_id || payload.ticket?.id || `MAVO-${Date.now()}`;\nconst cliente = payload.cliente || payload.customer?.name || payload.contact?.name || 'Cliente não identificado';\nconst telefone = payload.cliente_telefone || payload.phone || payload.contact?.phoneNumber || '';\n\n// Extrair mensagem\nlet mensagem = '';\nif (typeof payload.mensagem === 'string') {\n  mensagem = payload.mensagem;\n} else if (Array.isArray(payload.mensagens)) {\n  mensagem = payload.mensagens.join(' ');\n} else if (typeof payload.mensagens === 'string') {\n  mensagem = payload.mensagens;\n} else if (payload.message?.text) {\n  mensagem = payload.message.text;\n}\n\n// Validar dados mínimos\nif (!mensagem.trim()) {\n  throw new Error('Mensagem não pode ser vazia');\n}\n\nif (!telefone) {\n  console.warn('Telefone do cliente não fornecido');\n}\n\n// Formatar para API MAVO.AI\nconst output = {\n  ticket_id: ticketId,\n  cliente: cliente,\n  mensagens: mensagem.trim(),\n  canal: payload.canal || 'whatsapp',\n  tecnico: payload.tecnico || 'n8n',\n  data_evento: payload.data_evento || new Date().toISOString(),\n  cliente_telefone: telefone,\n  // Campos adicionais para triagem\n  origem: 'n8n',\n  timestamp: new Date().toISOString()\n};\n\nreturn [{ json: output }];"
+      },
+      "id": "normalizar_dados",
+      "name": "Normalizar Dados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MAVOAI_URL || 'http://localhost:3000' }}/api/ingestao/willtalk",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.MAVOAI_TOKEN || '***REMOVED-MTALK-TOKEN***' }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "maxRedirects": 0
+        }
+      },
+      "id": "enviar_mavoai",
+      "name": "Enviar para MAVO.AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [790, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equals",
+              "value2": "success"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "verificar_sucesso",
+      "name": "Verificar Sucesso",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.1,
+      "position": [1060, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log de sucesso\nconst response = $json;\n\nconsole.log('✅ Ingestão bem-sucedida:', {\n  ticket_id: response.ticket_id,\n  atendimento_id: response.atendimento_id,\n  timestamp: new Date().toISOString()\n});\n\nreturn [{ json: { status: 'success', message: 'Atendimento ingerido com sucesso', data: response } }];"
+      },
+      "id": "log_sucesso",
+      "name": "Log Sucesso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1330, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log de erro\nconst error = $json;\n\nconsole.error('❌ Erro na ingestão:', {\n  error: error.message || error.error,\n  timestamp: new Date().toISOString(),\n  payload: $input.first().json\n});\n\nreturn [{ json: { status: 'error', message: error.message || 'Erro na ingestão', original: $input.first().json } }];"
+      },
+      "id": "log_erro",
+      "name": "Log Erro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1330, 400]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook MAVO.AI": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Dados": {
+      "main": [
+        [
+          {
+            "node": "Enviar para MAVO.AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar para MAVO.AI": {
+      "main": [
+        [
+          {
+            "node": "Verificar Sucesso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar Sucesso": {
+      "main": [
+        [
+          {
+            "node": "Log Sucesso",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Erro",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "tags": ["mavoai", "ingestao", "willtalk", "automation"]
+}

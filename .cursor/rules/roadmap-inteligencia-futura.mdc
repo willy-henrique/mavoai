@@ -1,0 +1,33 @@
+---
+description: Roadmap futuro do cerebro operacional com foco em conhecimento e qualidade
+alwaysApply: true
+---
+
+# Roadmap Futuro do Cerebro (PostgreSQL + n8n)
+
+Objetivo: manter visivel para futuras implementacoes que o sistema evoluira de RAG basico para inteligencia operacional completa.
+
+## Capacidades obrigatorias futuras
+
+- Medir quem mais aciona o suporte por periodo, canal e cliente.
+- Medir problemas mais recorrentes (categoria, topicos e tendencia temporal).
+- Medir capacidade real por colaborador (volume, tempo, resolucao, retrabalho).
+- Analisar estilo de comunicacao do colaborador com cliente (clareza, tom, objetividade).
+- Suportar automacao progressiva com IA usando historico aprovado (human-in-the-loop).
+- Medir qualidade do atendimento (CSAT/NPS, taxa de resolucao, reincidencia).
+
+## Diretrizes de implementacao
+
+- Nao quebrar fluxo atual de ingestao WillTalk -> PostgreSQL -> processamento IA.
+- Priorizar dados reais; evitar depender de dados mock para metricas de negocio.
+- Todo novo indicador deve ter fonte rastreavel no banco (consulta SQL clara).
+- Toda automacao de resposta deve ter guardrails (confianca minima, fallback humano).
+- Expor resultados em dashboard com filtros por periodo, tecnico, cliente e canal.
+
+## Ordem sugerida de entrega
+
+1. Analytics operacional (rankings e recorrencia).
+2. Qualidade de atendimento (SLA, CSAT, reincidencia).
+3. Perfil de comunicacao por colaborador.
+4. Pipeline de treinamento/feedback da IA.
+5. Automacao assistida para atendimentos futuros.

@@ -1,4 +1,7 @@
-const DEFAULT_CHAT_BASE_URL = "https://api.x.ai/v1"
+import { GROQ_LLAMA4_SCOUT_INSTRUCT } from "@/lib/llm-defaults"
+
+/** Padrão do produto: Groq (OpenAI-compatible). xAI permanece suportado via AI_BASE_URL. */
+const DEFAULT_CHAT_BASE_URL = "https://api.groq.com/openai/v1"
 const DEFAULT_CHAT_MODEL = "grok-2-latest"
 const DEFAULT_EMBEDDING_BASE_URL = "https://api.openai.com/v1"
 const DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
@@ -32,10 +35,19 @@ function parseGroqRetrySeconds(errorBody: string): number | null {
 }
 
 function getChatConfig() {
+  const baseUrl = process.env.AI_BASE_URL || DEFAULT_CHAT_BASE_URL
+  const explicitModel = process.env.AI_CHAT_MODEL?.trim()
+  const model =
+    explicitModel ||
+    (baseUrl.includes("groq.com") ? GROQ_LLAMA4_SCOUT_INSTRUCT : DEFAULT_CHAT_MODEL)
   return {
-    baseUrl: process.env.AI_BASE_URL || DEFAULT_CHAT_BASE_URL,
-    apiKey: process.env.AI_API_KEY || process.env.GROK_API_KEY || "",
-    model: process.env.AI_CHAT_MODEL || DEFAULT_CHAT_MODEL,
+    baseUrl,
+    apiKey:
+      process.env.AI_API_KEY ||
+      process.env.GROQ_API_KEY ||
+      process.env.GROK_API_KEY ||
+      "",
+    model,
   }
 }
 
@@ -61,7 +73,7 @@ export async function gerarTextoIA(
   const config = getChatConfig()
 
   if (!config.apiKey) {
-    throw new Error("AI_API_KEY/GROK_API_KEY nao configurada")
+    throw new Error("AI_API_KEY ou GROQ_API_KEY nao configurada")
   }
 
   let lastErrorBody = ""

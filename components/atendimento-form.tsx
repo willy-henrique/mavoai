@@ -68,7 +68,7 @@ export function AtendimentoForm({ onSuccess }: AtendimentoFormProps) {
         if (!processResponse.ok) {
           setMessage({
             type: "success",
-            text: "Atendimento cadastrado, mas houve erro no processamento IA",
+            text: "Atendimento cadastrado, mas houve erro no processamento (Groq)",
           })
         } else {
           setMessage({
@@ -104,7 +104,7 @@ export function AtendimentoForm({ onSuccess }: AtendimentoFormProps) {
       <CardHeader>
         <CardTitle>Novo Atendimento</CardTitle>
         <CardDescription>
-          Cadastre um novo atendimento de suporte tecnico
+          Cadastre um atendimento; opcionalmente extraia problema, causa e solução com Groq.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -213,7 +213,7 @@ export function AtendimentoForm({ onSuccess }: AtendimentoFormProps) {
               ) : (
                 <Sparkles className="mr-2 h-4 w-4" />
               )}
-              {processing ? "Processando..." : "Cadastrar e Processar com IA"}
+              {processing ? "Processando..." : "Cadastrar e processar (Groq)"}
             </Button>
           </div>
         </form>

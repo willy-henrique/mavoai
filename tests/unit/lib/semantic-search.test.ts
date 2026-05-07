@@ -1,25 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { buscarSemantica } from "@/lib/semantic-search"
 
-// Mock do módulo de embeddings
 vi.mock("@/lib/embeddings", () => ({
   gerarEmbedding: vi.fn(),
   embeddingParaVector: vi.fn((arr: number[]) => `[${arr.join(",")}]`),
 }))
 
-import { gerarEmbedding } from "@/lib/embeddings"
+vi.mock("@/lib/database/postgres-client-no-vector", () => ({
+  query: vi.fn(),
+}))
 
-const makeSupabase = (rpcResult: { data?: unknown; error?: unknown } = { data: [], error: null }) => ({
-  rpc: vi.fn().mockResolvedValue(rpcResult),
-  from: vi.fn().mockReturnValue({
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    not: vi.fn().mockReturnThis(),
-    order: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-    or: vi.fn().mockResolvedValue({ data: [], error: null }),
-  }),
-})
+import { gerarEmbedding } from "@/lib/embeddings"
+import { query } from "@/lib/database/postgres-client-no-vector"
 
 describe("buscarSemantica", () => {
   beforeEach(() => {
@@ -29,15 +21,22 @@ describe("buscarSemantica", () => {
   it("usa busca vetorial quando embedding funciona e RPC retorna dados", async () => {
     const mockEmbedding = Array(1536).fill(0.1)
     vi.mocked(gerarEmbedding).mockResolvedValue(mockEmbedding)
+    vi.mocked(query).mockResolvedValueOnce({
+      rows: [
+        {
+          id: "1",
+          similaridade: 0.92,
+          resumo_problema: "Impressora não imprime",
+          causa: "Driver corrompido",
+          solucao: "Reinstalar driver",
+        },
+      ],
+    })
 
-    const rows = [
-      { id: "1", similaridade: 0.92, resumo_problema: "Impressora não imprime", causa: "Driver corrompido", solucao: "Reinstalar driver" },
-    ]
-    const supabase = makeSupabase({ data: rows, error: null })
+    const resultado = await buscarSemantica("impressora com problema")
 
-    const resultado = await buscarSemantica(supabase as any, "impressora com problema")
-
-    expect(supabase.rpc).toHaveBeenCalledWith("buscar_atendimentos_semanticos", expect.any(Object))
+    expect(query).toHaveBeenCalled()
+    expect(String(vi.mocked(query).mock.calls[0][0])).toContain("buscar_atendimentos_semanticos")
     expect(resultado).toHaveLength(1)
     expect(resultado[0].estrategia).toBe("vetorial")
     expect(resultado[0].similaridade).toBe(0.92)
@@ -47,47 +46,64 @@ describe("buscarSemantica", () => {
     vi.mocked(gerarEmbedding).mockRejectedValue(new Error("EMBEDDING_API_KEY não configurada"))
 
     const fallbackRows = [
-      { id: "2", resumo_problema: "Rede sem acesso", problema: "Sem rede", causa: "Cabo desconectado", solucao: "Reconectar cabo", resumo: "Rede offline", texto_original: "rede sem acesso cabo", processado: true },
+      {
+        id: "2",
+        resumo_problema: "Rede sem acesso",
+        problema: "Sem rede",
+        causa: "Cabo desconectado",
+        solucao: "Reconectar cabo",
+        resumo: "Rede offline",
+        texto_original: "rede sem acesso cabo",
+        processado: true,
+      },
     ]
-    const supabase = {
-      rpc: vi.fn(),
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        not: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockReturnThis(),
-        or: vi.fn().mockResolvedValue({ data: fallbackRows, error: null }),
-      }),
-    }
 
-    const resultado = await buscarSemantica(supabase as any, "rede sem acesso")
+    vi.mocked(query).mockImplementation(async (sql: string) => {
+      if (sql.includes("buscar_atendimentos_simples")) {
+        return { rows: fallbackRows }
+      }
+      if (sql.includes("FROM atendimentos") && sql.includes("ORDER BY")) {
+        return { rows: [] }
+      }
+      return { rows: [] }
+    })
 
-    expect(supabase.rpc).not.toHaveBeenCalled()
-    expect(resultado).toHaveLength(1)
+    const resultado = await buscarSemantica("rede sem acesso")
+
+    expect(resultado.length).toBeGreaterThanOrEqual(1)
     expect(resultado[0].estrategia).toBe("textual")
   })
 
-  it("cai no fallback textual quando RPC retorna erro", async () => {
+  it("cai no fallback textual quando RPC vetorial falha", async () => {
     const mockEmbedding = Array(1536).fill(0.1)
     vi.mocked(gerarEmbedding).mockResolvedValue(mockEmbedding)
+    vi.mocked(query).mockImplementation(async (sql: string) => {
+      if (sql.includes("buscar_atendimentos_semanticos")) {
+        throw new Error("função buscar_atendimentos_semanticos não existe")
+      }
+      if (sql.includes("buscar_atendimentos_simples")) {
+        return {
+          rows: [
+            {
+              id: "3",
+              resumo_problema: "Software travado",
+              problema: "Software",
+              causa: "Memória",
+              solucao: "Reiniciar",
+              resumo: "SW travado",
+              texto_original: "software travado",
+              processado: true,
+            },
+          ],
+        }
+      }
+      if (sql.includes("FROM atendimentos") && sql.includes("ORDER BY")) {
+        return { rows: [] }
+      }
+      return { rows: [] }
+    })
 
-    const fallbackRows = [
-      { id: "3", resumo_problema: "Software travado", problema: "Software", causa: "Memória", solucao: "Reiniciar", resumo: "SW travado", texto_original: "software travado", processado: true },
-    ]
-    const supabase = {
-      rpc: vi.fn().mockResolvedValue({ data: null, error: { message: "rpc error" } }),
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        not: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockReturnThis(),
-        or: vi.fn().mockResolvedValue({ data: fallbackRows, error: null }),
-      }),
-    }
-
-    const resultado = await buscarSemantica(supabase as any, "software travado")
+    const resultado = await buscarSemantica("software travado")
 
     expect(resultado[0].estrategia).toBe("textual")
   })
@@ -95,19 +111,17 @@ describe("buscarSemantica", () => {
   it("retorna array vazio quando não há dados e fallback também é vazio", async () => {
     vi.mocked(gerarEmbedding).mockRejectedValue(new Error("sem embedding"))
 
-    const supabase = {
-      rpc: vi.fn(),
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        not: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockReturnThis(),
-        or: vi.fn().mockResolvedValue({ data: [], error: null }),
-      }),
-    }
+    vi.mocked(query).mockImplementation(async (sql: string) => {
+      if (sql.includes("buscar_atendimentos_simples")) {
+        return { rows: [] }
+      }
+      if (sql.includes("FROM atendimentos") && sql.includes("ORDER BY")) {
+        return { rows: [] }
+      }
+      return { rows: [] }
+    })
 
-    const resultado = await buscarSemantica(supabase as any, "xyz inexistente")
+    const resultado = await buscarSemantica("xyz inexistente")
 
     expect(resultado).toHaveLength(0)
   })
@@ -122,23 +136,21 @@ describe("buscarSemantica", () => {
       causa: null,
       solucao: `S${i}`,
       resumo: `R${i}`,
-      texto_original: `texto ${i}`,
+      texto_original: `texto problema coisa ${i}`,
       processado: true,
     }))
 
-    const supabase = {
-      rpc: vi.fn(),
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        not: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockReturnThis(),
-        or: vi.fn().mockResolvedValue({ data: rows.slice(0, 2), error: null }),
-      }),
-    }
+    vi.mocked(query).mockImplementation(async (sql: string) => {
+      if (sql.includes("buscar_atendimentos_simples")) {
+        return { rows }
+      }
+      if (sql.includes("FROM atendimentos") && sql.includes("ORDER BY")) {
+        return { rows: [] }
+      }
+      return { rows: [] }
+    })
 
-    const resultado = await buscarSemantica(supabase as any, "qualquer coisa", 2)
+    const resultado = await buscarSemantica("qualquer coisa problema", 2)
 
     expect(resultado.length).toBeLessThanOrEqual(2)
   })

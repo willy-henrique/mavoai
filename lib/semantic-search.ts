@@ -1,4 +1,5 @@
 import { gerarEmbedding, embeddingParaVector } from "@/lib/embeddings"
+import { query } from "@/lib/database/postgres-client-no-vector"
 import { logger } from "@/lib/logger"
 
 export interface ResultadoSemantico {
@@ -51,21 +52,19 @@ function calcularScoreLexical(textoBase: string, termos: string[]) {
 }
 
 export async function buscarSemantica(
-  supabase: any,
   texto: string,
   limite = 3
 ): Promise<ResultadoSemantico[]> {
   try {
     const embedding = await gerarEmbedding(texto)
     const vector = embeddingParaVector(embedding)
+    const result = await query(
+      "SELECT * FROM buscar_atendimentos_semanticos($1::text, $2::int)",
+      [vector, limite]
+    )
 
-    const { data, error } = await supabase.rpc("buscar_atendimentos_semanticos", {
-      query_embedding: vector,
-      match_count: limite,
-    })
-
-    if (!error && Array.isArray(data)) {
-      return data.map((row: any) => ({
+    if (Array.isArray(result.rows)) {
+      return result.rows.map((row: any) => ({
         id: row.id,
         similaridade: Number(row.similaridade ?? 0),
         resumo_problema: row.resumo_problema || "",
@@ -83,39 +82,28 @@ export async function buscarSemantica(
   }
 
   const termos = normalizarTermosBusca(texto)
-  const filtro = montarFiltroIlike(termos)
+  const filtro = montarFiltroIlike(termos) // mantido para futura observabilidade
+  let fallbackData: any[] = []
 
-  let query = supabase
-    .from("atendimentos")
-    .select("id, resumo, resumo_problema, problema, causa, solucao, texto_original, processado")
-    .eq("processado", true)
-    .not("solucao", "is", null)
-    .order("updated_at", { ascending: false })
-    .limit(limite)
-  if (filtro) {
-    query = query.or(filtro)
-  }
-
-  let { data: fallbackData, error: fallbackError } = await query
-
-  if (fallbackError) {
-    throw fallbackError
+  if (filtro || termos.length > 0) {
+    const result = await query(
+      `SELECT id, resumo, resumo_problema, problema, causa, solucao, texto_original
+       FROM buscar_atendimentos_simples($1, $2)`,
+      [termos.join(" "), limite]
+    )
+    fallbackData = result.rows || []
   }
 
   // Se não houver casos processados úteis, volta para texto bruto para não zerar resposta.
   if (!fallbackData || fallbackData.length === 0) {
-    let rawQuery = supabase
-      .from("atendimentos")
-      .select("id, resumo, resumo_problema, problema, causa, solucao, texto_original")
-      .order("updated_at", { ascending: false })
-      .limit(limite)
-    if (filtro) {
-      rawQuery = rawQuery.or(filtro)
-    }
-    const raw = await rawQuery
-    fallbackData = raw.data || []
-    fallbackError = raw.error
-    if (fallbackError) throw fallbackError
+    const raw = await query(
+      `SELECT id, resumo, resumo_problema, problema, causa, solucao, texto_original
+       FROM atendimentos
+       ORDER BY updated_at DESC
+       LIMIT $1`,
+      [limite]
+    )
+    fallbackData = raw.rows || []
   }
 
   const ranked = (fallbackData || [])

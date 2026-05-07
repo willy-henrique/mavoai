@@ -1,4 +1,3 @@
-import { createClient } from "@/lib/supabase/server"
 import { buscarSemantica } from "@/lib/semantic-search"
 import { NextResponse } from "next/server"
 
@@ -13,8 +12,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const supabase = await createClient()
-    const resultados = await buscarSemantica(supabase, texto, 3)
+    const resultados = await buscarSemantica(texto, 3)
 
     const usouVetorial =
       resultados.length > 0 && (resultados[0].estrategia === "vetorial" || resultados[0].similaridade > 0)
