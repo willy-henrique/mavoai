@@ -45,9 +45,15 @@ const requestSchema = z.object({
     triage_completed: z.boolean().default(false),
     menu_attempts: z.coerce.number().default(0),
     queue_id: z.string().nullable().optional(),
+    menu_invalid_attempts: z.coerce.number().int().min(0).optional(),
+    investigation_adequate_rounds: z.coerce.number().int().min(0).optional(),
     /** Opcional: total de mensagens do cliente desde a escolha da fila (anti-loop). */
     investigation_messages_seen: z.coerce.number().int().min(0).optional(),
     investigation_inadequate_streak: z.coerce.number().int().min(0).optional(),
+    resolution_active: z.boolean().optional(),
+    resolution_attempts: z.coerce.number().int().min(0).optional(),
+    resolution_problem_text: z.string().optional(),
+    resolution_prev_solutions: z.string().optional(),
   }),
   queues: z.array(queueSchema).default([]),
 }).superRefine((data, ctx) => {
@@ -108,10 +114,22 @@ export async function POST(request: Request) {
         triage_completed: body.conversation.triage_completed,
         menu_attempts: body.conversation.menu_attempts,
         queue_id: body.conversation.queue_id ?? null,
+        menu_invalid_attempts:
+          body.conversation.menu_invalid_attempts,
+        investigation_adequate_rounds:
+          body.conversation.investigation_adequate_rounds,
         investigation_messages_seen:
           body.conversation.investigation_messages_seen,
         investigation_inadequate_streak:
           body.conversation.investigation_inadequate_streak,
+        resolution_active:
+          body.conversation.resolution_active,
+        resolution_attempts:
+          body.conversation.resolution_attempts,
+        resolution_problem_text:
+          body.conversation.resolution_problem_text,
+        resolution_prev_solutions:
+          body.conversation.resolution_prev_solutions,
       },
       queues: body.queues,
     })

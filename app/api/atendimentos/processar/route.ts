@@ -107,7 +107,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ data: data.rows[0] || null, processed: parsed })
   } catch (error) {
     logger.error("processamento_erro_critico", {
-      atendimentoId,
+      atendimentoId: atendimentoId ?? undefined,
       error: error instanceof Error ? error.message : String(error),
     })
     return NextResponse.json(
