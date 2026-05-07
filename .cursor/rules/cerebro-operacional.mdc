@@ -9,20 +9,30 @@ Sistema de inteligência operacional para tickets de suporte. Processa tickets c
 
 ## Arquitetura
 
+Modo recomendado (orquestrador no Cérebro): WillTalk persiste conversa e chama o Cérebro a cada inbound.
+
 ```
-WillTalk (WhatsApp) → ticket-upsert (triagem) → [após triagem] → Cérebro
-                                                                    ├─ /api/ingestao/willtalk (salvar ticket)
-                                                                    ├─ /api/resposta-assistida (gerar resposta IA)
-                                                                    └─ /api/busca-semantica (buscar casos similares)
+WillTalk → ticket-upsert → POST /api/orquestrador/v1/mensagem (menu + investigação + visão)
+         ← reply_text + estado (queueId, triageCompleted, menuAttempts)
+         → [quando triage completa] → /api/ingestao/willtalk + RAG no painel
 ```
 
-O Cérebro só é acionado DEPOIS que a triagem no WillTalk está completa (`triageCompleted === true`).
+Modo legado (triagem só no WillTalk): ingestão só após triagem local.
+
+```
+WillTalk (triagem local) → [após triagem] → Cérebro
+                                              ├─ /api/ingestao/willtalk
+                                              ├─ /api/resposta-assistida
+                                              └─ /api/busca-semantica
+```
+
+Outras plataformas (ex.: MTalk) usam o mesmo contrato `POST /api/orquestrador/v1/mensagem`.
 
 ## Stack
 
 - **Framework**: Next.js (App Router), TypeScript, React, Tailwind, SWR
 - **Banco**: Supabase (PostgreSQL + pgvector)
-- **IA Chat**: Groq (`openai/gpt-oss-120b`) via Vercel AI SDK
+- **IA Chat**: Groq — padrão `meta-llama/llama-4-scout-17b-16e-instruct` (texto + visão no orquestrador); sobrescrever com `AI_CHAT_MODEL`
 - **IA Embeddings**: OpenAI (`text-embedding-3-small`) — opcional
 - **Validação**: Zod
 
@@ -30,6 +40,7 @@ O Cérebro só é acionado DEPOIS que a triagem no WillTalk está completa (`tri
 
 | Endpoint | Função |
 |----------|--------|
+| `POST /api/orquestrador/v1/mensagem` | Orquestrador multi-plataforma: menu, fila, evidências, visão, handoff |
 | `POST /api/ingestao/willtalk` | Recebe ticket do WillTalk, salva e processa com IA |
 | `POST /api/resposta-assistida` | Gera resposta sugerida via RAG (busca semântica + LLM) |
 | `POST /api/busca-semantica` | Busca tickets similares por embedding vetorial |
@@ -46,17 +57,16 @@ O Cérebro só é acionado DEPOIS que a triagem no WillTalk está completa (`tri
 
 ## Integração com WillTalk
 
-- WillTalk faz a triagem (menu → fila → SLA)
-- Após triagem completa, n8n (opcional) ou chamada direta envia dados ao Cérebro
-- Cérebro processa e disponibiliza resposta IA no painel
-- Resposta IA é para consulta do atendente, NÃO envio automático ao cliente
+- Com `CEREBRO_ORCHESTRATOR_URL` no WillTalk: triagem e respostas automáticas vêm do `orquestrador`; WillTalk aplica estado e envia WhatsApp.
+- Após `triageCompleted`, o ticket-upsert continua disparando `/api/ingestao/willtalk` para o painel/RAG.
+- Resposta assistida no painel: `/api/resposta-assistida` (atendente consulta; não é envio automático ao cliente final salvo fluxo explícito).
 
 ## Variáveis de Ambiente
 
 ```env
 AI_API_KEY=<groq_api_key>
 AI_BASE_URL=https://api.groq.com/openai/v1
-AI_CHAT_MODEL=openai/gpt-oss-120b
+AI_CHAT_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 EMBEDDING_API_KEY=<openai_api_key>  # opcional
 SUPABASE_URL=<url>
 SUPABASE_SERVICE_KEY=<key>

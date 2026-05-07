@@ -1,4 +1,3 @@
-import { createClient } from "@/lib/supabase/server"
 import { gerarRespostaAssistidaComContexto } from "@/lib/assisted-response"
 import { NextResponse } from "next/server"
 
@@ -32,8 +31,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const supabase = await createClient()
-    const result = await gerarRespostaAssistidaComContexto(supabase, texto, audience)
+    const result = await gerarRespostaAssistidaComContexto(texto, audience)
 
     return NextResponse.json({
       resposta: result.resposta,

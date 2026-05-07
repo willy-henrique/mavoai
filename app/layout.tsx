@@ -7,8 +7,9 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'Sistema de Inteligencia Operacional',
-  description: 'Sistema de gestao e analise de atendimentos de suporte tecnico com processamento por IA',
+  title: 'Mavo AI · Groq',
+  description:
+    'Inteligência operacional para suporte técnico: chat e análise multimodal (texto e imagens) via Groq Llama 4 Scout.',
   generator: 'v0.app',
   icons: {
     icon: [
@@ -35,7 +36,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    <html lang="pt-BR">
       <body className="font-sans antialiased">
         {children}
         <Analytics />

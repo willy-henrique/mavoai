@@ -1,3 +1,4 @@
+import { forwardCanonicalIngestionEvent } from "@/lib/integration-forwarding"
 import { NextResponse } from "next/server"
 
 type CanonicalEvent = {
@@ -33,33 +34,23 @@ export async function POST(request: Request) {
     )
   }
 
-  const headers = new Headers()
-  headers.set("Content-Type", "application/json")
-  const auth = request.headers.get("authorization")
-  if (auth) headers.set("Authorization", auth)
-
-  headers.set("X-Source-System", payload.metadata?.sourceSystem || "external")
-  headers.set("X-Source-Entity-Id", payload.metadata?.sourceEntityId || payload.ticket_id)
-  headers.set("X-Tenant-Id", payload.metadata?.tenantId || "default")
-  headers.set("X-Ingestion-Id", payload.metadata?.ingestionId || `ing-${Date.now()}`)
-
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || new URL(request.url).origin
-  const forwardPayload = {
+  return forwardCanonicalIngestionEvent(request, {
     ticket_id: payload.ticket_id,
     cliente: payload.cliente,
     canal: payload.canal || "outro",
     mensagens: payload.mensagens,
     tecnico: payload.tecnico || "IntegracaoExterna",
-    data_evento: payload.data_evento || payload.metadata?.sourceTimestamp || new Date().toISOString(),
-    metadata: payload.metadata || {},
-  }
-
-  const res = await fetch(`${baseUrl}/api/ingestao/willtalk`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(forwardPayload),
+    data_evento:
+      payload.data_evento ||
+      payload.metadata?.sourceTimestamp ||
+      new Date().toISOString(),
+    metadata: {
+      sourceSystem: payload.metadata?.sourceSystem || "external",
+      sourceEntityId: payload.metadata?.sourceEntityId || payload.ticket_id,
+      tenantId: payload.metadata?.tenantId || "default",
+      ingestionId: payload.metadata?.ingestionId || `ing-${Date.now()}`,
+      sourceTimestamp: payload.metadata?.sourceTimestamp,
+      tags: payload.metadata?.tags,
+    },
   })
-  const body = await res.json().catch(() => ({}))
-
-  return NextResponse.json(body, { status: res.status })
 }

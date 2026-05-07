@@ -13,6 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { Search, Lightbulb, MessageSquare, AlertTriangle } from "lucide-react"
+import { GroqMotorStrip } from "@/components/groq-motor-strip"
 import type { ResultadoBuscaSemantica } from "@/lib/types"
 
 export function SearchConsole() {
@@ -77,14 +78,15 @@ export function SearchConsole() {
       if (response.status === 429) {
         setIaError(
           data.mensagem ||
-            "IA temporariamente indisponivel (rate limit). Aguarde ~15s e tente novamente."
+            "Groq temporariamente indisponível (rate limit). Aguarde ~15s e tente novamente."
         )
         return
       }
 
       if (response.status === 503) {
         setIaError(
-          data.mensagem || "IA nao configurada. Verifique as variaveis de ambiente."
+          data.mensagem ||
+            "Groq não configurada (AI_API_KEY / GROQ_API_KEY). Verifique o .env.local."
         )
         return
       }
@@ -97,7 +99,9 @@ export function SearchConsole() {
     } catch (error) {
       console.error("Erro ao gerar resposta:", error)
       setRespostaSugerida("")
-      setIaError("Nao foi possivel gerar a resposta sugerida. Tente novamente.")
+      setIaError(
+        "Não foi possível gerar a resposta assistida (Groq). Tente novamente."
+      )
     } finally {
       setGenerating(false)
     }
@@ -112,10 +116,11 @@ export function SearchConsole() {
             Buscar Solucoes
           </CardTitle>
           <CardDescription>
-            Descreva o problema e encontre solucoes em atendimentos anteriores
+            Busca em histórico; a sugestão de resposta é gerada pelo motor Groq (Llama 4 Scout).
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
+          <GroqMotorStrip variant="subtle" className="rounded-md border bg-muted/20 px-3 py-2" />
           <Textarea
             placeholder="Ex: Computador nao liga, usuario esqueceu senha, impressora sem conexao..."
             className="min-h-[100px]"
@@ -152,7 +157,7 @@ export function SearchConsole() {
               ) : (
                 <Lightbulb className="mr-2 h-4 w-4" />
               )}
-              Gerar Resposta IA
+              Resposta assistida (Groq)
             </Button>
           </div>
         </CardContent>

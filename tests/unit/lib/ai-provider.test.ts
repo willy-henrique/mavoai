@@ -33,6 +33,7 @@ describe("gerarTextoIA", () => {
 
   afterEach(() => {
     delete process.env.AI_API_KEY
+    delete process.env.GROQ_API_KEY
     delete process.env.AI_BASE_URL
     delete process.env.AI_CHAT_MODEL
   })
@@ -43,9 +44,32 @@ describe("gerarTextoIA", () => {
     expect(result).toBe("Resposta da IA")
   })
 
+  it("usa Llama 4 Scout como default no Groq quando AI_CHAT_MODEL nao esta definido", async () => {
+    process.env.AI_BASE_URL = "https://api.groq.com/openai/v1"
+    delete process.env.AI_CHAT_MODEL
+    mockFetch.mockResolvedValueOnce(makeOkResponse("ok"))
+    await gerarTextoIA("s", "u")
+    const init = mockFetch.mock.calls[0][1] as { body: string }
+    const body = JSON.parse(init.body) as { model: string }
+    expect(body.model).toBe("meta-llama/llama-4-scout-17b-16e-instruct")
+  })
+
   it("lança erro quando API_KEY não está configurada", async () => {
     delete process.env.AI_API_KEY
-    await expect(gerarTextoIA("system", "user")).rejects.toThrow("AI_API_KEY")
+    delete process.env.GROQ_API_KEY
+    await expect(gerarTextoIA("system", "user")).rejects.toThrow(/AI_API_KEY|GROQ_API_KEY/)
+  })
+
+  it("usa Groq e Scout por omissão quando AI_BASE_URL e AI_CHAT_MODEL não estão definidos", async () => {
+    delete process.env.AI_BASE_URL
+    delete process.env.AI_CHAT_MODEL
+    mockFetch.mockResolvedValueOnce(makeOkResponse("ok"))
+    await gerarTextoIA("s", "u")
+    const url = String(mockFetch.mock.calls[0][0])
+    const init = mockFetch.mock.calls[0][1] as { body: string }
+    const body = JSON.parse(init.body) as { model: string }
+    expect(url).toContain("api.groq.com")
+    expect(body.model).toBe("meta-llama/llama-4-scout-17b-16e-instruct")
   })
 
   it("faz retry em 429 com backoff", async () => {

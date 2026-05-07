@@ -6,6 +6,8 @@ Este contrato padroniza ingestao de dados de qualquer sistema externo para o Cé
 
 - `POST /api/ingestao/v1/events` (endpoint canonico versionado)
 - `POST /api/ingestao/willtalk` (retrocompatibilidade para fluxo legado WillTalk)
+- `POST /api/ingestao/mtalk` (adapter para payloads flexiveis do MTalk)
+- `POST /api/ingestao/mavo-gestao` (adapter para payloads flexiveis do ERP Mavo Gestao)
 
 ## Headers obrigatorios
 
@@ -63,4 +65,3 @@ Para manter a qualidade da resposta assistida:
 - `canal`
 - `metadata.sourceSystem`
 - `metadata.tenantId`
-

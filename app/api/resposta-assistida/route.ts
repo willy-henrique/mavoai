@@ -1,4 +1,3 @@
-import { createClient } from "@/lib/supabase/server"
 import { gerarRespostaAssistidaComContexto } from "@/lib/assisted-response"
 import { buscarSemantica } from "@/lib/semantic-search"
 import { logger } from "@/lib/logger"
@@ -30,9 +29,8 @@ export async function POST(request: Request) {
       )
     }
 
-    const supabase = await createClient()
     const audienceMode = audience === "cliente" ? "cliente" : "atendente"
-    const result = await gerarRespostaAssistidaComContexto(supabase, texto, audienceMode)
+    const result = await gerarRespostaAssistidaComContexto(texto, audienceMode)
 
     const baseResponse: Record<string, unknown> = {
       resposta_sugerida: result.resposta,
@@ -41,7 +39,7 @@ export async function POST(request: Request) {
     }
 
     if (debug) {
-      const casos = result.casos.length > 0 ? result.casos : await buscarSemantica(supabase, texto, 3)
+      const casos = result.casos.length > 0 ? result.casos : await buscarSemantica(texto, 3)
       baseResponse.casos_utilizados = casos.map((c: any) => ({
         id: c.id,
         estrategia: c.estrategia || (c.similaridade > 0 ? "vetorial" : "textual"),
@@ -52,10 +50,10 @@ export async function POST(request: Request) {
 
     return NextResponse.json(baseResponse)
   } catch (error) {
+    const msg = formatCaughtError(error)
     logger.error("resposta_assistida_erro", {
       error: msg.slice(0, 400),
     })
-    const msg = formatCaughtError(error)
     if (msg.includes("429") || msg.includes("rate_limit")) {
       return NextResponse.json(
         {

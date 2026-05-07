@@ -1,0 +1,304 @@
+{
+  "name": "MAVOAI_Fluxo_Completo",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook-test/03651a89-8f3b-4635-a06d-e97157750352",
+        "responseMode": "responseNode",
+        "responseData": "firstEntryJson",
+        "options": {}
+      },
+      "id": "webhook_mavoai",
+      "name": "1. Webhook MAVO.AI",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [200, 300],
+      "webhookId": "webhook-test-03651a89-8f3b-4635-a06d-e97157750352"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalização robusta para MAVO.AI + WillTalk\nconst root = $json;\nconst src = root.body && typeof root.body === 'object' && !Array.isArray(root.body)\n  ? { ...root, ...root.body }\n  : root;\n\n// Função auxiliar para extrair texto\nfunction toText(v) {\n  if (v == null) return '';\n  if (typeof v === 'string') return v.trim();\n  if (typeof v === 'number' || typeof v === 'boolean') return String(v);\n  if (Array.isArray(v)) return v.map(toText).filter(Boolean).join(' ');\n  if (typeof v === 'object') {\n    if (v.text != null) return toText(v.text);\n    if (v.mensagem != null) return toText(v.mensagem);\n    if (v.content != null) return toText(v.content);\n    if (v.body != null) return toText(v.body);\n    return '';\n  }\n  return String(v);\n}\n\n// Extrair nome do cliente\nfunction extractClienteName(obj) {\n  if (!obj) return 'Cliente';\n  if (typeof obj === 'string') return obj.trim() || 'Cliente';\n  if (typeof obj === 'object') {\n    return (obj.name || obj.nome || obj.pushName || '').trim() || 'Cliente';\n  }\n  return 'Cliente';\n}\n\n// Extrair telefone\nfunction extractPhone(obj) {\n  const phones = [\n    obj.cliente_telefone,\n    obj.telefone,\n    obj.phone,\n    obj.phoneNumber,\n    obj.contact?.phoneNumber,\n    obj.from,\n    obj.cliente?.telefone,\n    obj.cliente?.phone\n  ];\n  \n  for (const phone of phones) {\n    if (phone) {\n      const cleaned = String(phone).replace(/\\D/g, '');\n      if (cleaned.length >= 8) return cleaned;\n    }\n  }\n  \n  // Fallback: extrair números do nome/string\n  if (typeof obj.cliente === 'string') {\n    const nums = obj.cliente.replace(/\\D/g, '');\n    if (nums.length >= 8) return nums;\n  }\n  \n  throw new Error('Telefone do cliente não encontrado no payload');\n}\n\n// Extrair mensagem principal\nconst mensagem = toText(\n  src.mensagem || src.message || src.mensagens || src.messages || src.text || src.body || ''\n);\n\nif (!mensagem || mensagem.length < 2) {\n  throw new Error('Mensagem muito curta ou vazia');\n}\n\n// Extrair ticket ID\nconst ticket_id = String(\n  src.ticket_id || src.ticket?.id || src.conversation_id || src.conversationId || `WT-${Date.now()}`\n).trim();\n\n// Extrair dados\nconst cliente_nome = extractClienteName(src.cliente || src.contact || src.customer);\nconst cliente_telefone = extractPhone(src);\nconst canal = src.canal || 'whatsapp';\nconst tecnico = src.tecnico || src.agent || 'n8n';\nconst data_evento = src.data_evento || src.timestamp || new Date().toISOString();\nconst event_id = src.event_id || `evt-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;\n\n// Log para debug\nconsole.log('📥 Payload normalizado:', {\n  ticket_id,\n  cliente_nome,\n  cliente_telefone: cliente_telefone.substring(0, 4) + '...',\n  mensagem_length: mensagem.length,\n  canal,\n  tecnico\n});\n\nreturn [{\n  json: {\n    // Para WillTalk triagem\n    event_id,\n    canal,\n    cliente_nome,\n    cliente_telefone,\n    mensagem,\n    ticket_id,\n    \n    // Para MAVO.AI ingestão\n    ticket_id_mavoai: ticket_id,\n    cliente: cliente_nome,\n    mensagens: mensagem,\n    data_evento,\n    tecnico: tecnico,\n    \n    // Metadata\n    origem: 'n8n',\n    timestamp: new Date().toISOString(),\n    texto: mensagem\n  }\n}];"
+      },
+      "id": "normalizar_dados",
+      "name": "2. Normalizar Dados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WILLTALK_URL || 'http://localhost:4002' }}/api/webhooks/n8n/ticket-upsert",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  event_id: $json.event_id,\n  canal: $json.canal,\n  cliente: {\n    nome: $json.cliente_nome,\n    telefone: $json.cliente_telefone\n  },\n  mensagem: $json.mensagem,\n  ticket_id: $json.ticket_id\n}) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.WILLTALK_TOKEN || '9e24439a849860fd74f93190df8b5ebb8c2bc7922beceba5020b8a335f45e3e1' }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "retryOnFail": true,
+          "maxTries": 3
+        }
+      },
+      "id": "triagem_willtalk",
+      "name": "3. Triagem WillTalk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.triageCompleted }}",
+              "value2": true,
+              "operation": "equal"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "verificar_triagem",
+      "name": "4. Triagem Completa?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.1,
+      "position": [980, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MAVOAI_URL || 'http://localhost:3000' }}/api/ingestao/willtalk",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  ticket_id: $json.ticket_id_mavoai,\n  cliente: $json.cliente,\n  mensagens: $json.mensagens,\n  canal: $json.canal,\n  tecnico: $json.tecnico,\n  data_evento: $json.data_evento,\n  cliente_telefone: $json.cliente_telefone\n}) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.MAVOAI_TOKEN || '9e24439a849860fd74f93190df8b5ebb8c2bc7922beceba5020b8a335f45e3e1' }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "retryOnFail": true,
+          "maxTries": 3
+        }
+      },
+      "id": "ingestao_mavoai",
+      "name": "5. Ingestão MAVO.AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1240, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MAVOAI_URL || 'http://localhost:3000' }}/api/resposta-assistida",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  texto: $json.texto,\n  ticket_id: $json.ticket_id_mavoai,\n  cliente: $json.cliente\n}) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.CEREBRO_INTERNAL_TOKEN || 'internal_secret_token_123' }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "retryOnFail": true,
+          "maxTries": 2
+        }
+      },
+      "id": "gerar_resposta_ia",
+      "name": "6. Gerar Resposta IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WILLTALK_URL || 'http://localhost:4002' }}/api/webhooks/cerebro/reply",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  ticket_id: $json.ticket_id,\n  resposta: $('6. Gerar Resposta IA').item.json.resposta || $('6. Gerar Resposta IA').item.json.texto || 'Resposta gerada pela IA',\n  categoria: $('6. Gerar Resposta IA').item.json.categoria || 'Geral',\n  confianca: $('6. Gerar Resposta IA').item.json.confianca || 0.8\n}) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.WILLTALK_TOKEN || '9e24439a849860fd74f93190df8b5ebb8c2bc7922beceba5020b8a335f45e3e1' }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "retryOnFail": true,
+          "maxTries": 3
+        }
+      },
+      "id": "enviar_resposta_willtalk",
+      "name": "7. Enviar Resposta WillTalk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1760, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log de sucesso completo\nconst triageData = $json;\nconst normalizado = $('2. Normalizar Dados').item.json;\nconst ingestao = $('5. Ingestão MAVO.AI').item.json;\nconst respostaIA = $('6. Gerar Resposta IA').item.json;\n\nconsole.log('✅ Fluxo completo executado:', {\n  ticket_id: normalizado.ticket_id,\n  cliente: normalizado.cliente_nome,\n  triagem_completa: triageData.triageCompleted,\n  atendimento_id: ingestao?.atendimento_id,\n  resposta_gerada: !!respostaIA\n});\n\nreturn [{\n  json: {\n    status: 'success',\n    message: 'Atendimento processado com sucesso',\n    ticket_id: normalizado.ticket_id,\n    atendimento_id: ingestao?.atendimento_id,\n    resposta_ia: respostaIA,\n    timestamp: new Date().toISOString(),\n    // Retornar para webhook response\n    webhook_response: {\n      success: true,\n      message: 'Mensagem recebida e processada pelo MAVO.AI',\n      atendimento_id: ingestao?.atendimento_id\n    }\n  }\n}];"
+      },
+      "id": "log_sucesso",
+      "name": "8. Log Sucesso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2020, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log triagem pendente\nconst triageData = $json;\nconst normalizado = $('2. Normalizar Dados').item.json;\n\nconsole.log('⏳ Triagem pendente:', {\n  ticket_id: normalizado.ticket_id,\n  cliente: normalizado.cliente_nome,\n  action: triageData.action,\n  menuAttempts: triageData.menuAttempts\n});\n\nreturn [{\n  json: {\n    status: 'triagem_pendente',\n    message: 'Aguardando triagem do WillTalk',\n    ticket_id: normalizado.ticket_id,\n    action: triageData.action,\n    menuAttempts: triageData.menuAttempts,\n    shouldReply: triageData.shouldReply,\n    timestamp: new Date().toISOString(),\n    // Retornar para webhook response\n    webhook_response: {\n      success: true,\n      message: 'Triagem em andamento no WillTalk',\n      status: 'triagem_pendente'\n    }\n  }\n}];"
+      },
+      "id": "log_triagem_pendente",
+      "name": "9. Log Triagem Pendente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1240, 440]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Tratamento de erros\nconst error = $input.first().json;\nconst normalizado = $('2. Normalizar Dados')?.item?.json;\n\nconsole.error('❌ Erro no fluxo:', {\n  error: error.message || error.error || 'Erro desconhecido',\n  ticket_id: normalizado?.ticket_id,\n  timestamp: new Date().toISOString()\n});\n\nreturn [{\n  json: {\n    status: 'error',\n    message: error.message || 'Erro no processamento',\n    ticket_id: normalizado?.ticket_id,\n    timestamp: new Date().toISOString(),\n    // Retornar para webhook response\n    webhook_response: {\n      success: false,\n      error: error.message || 'Erro no processamento',\n      ticket_id: normalizado?.ticket_id\n    }\n  }\n}];"
+      },
+      "id": "tratar_erro",
+      "name": "10. Tratar Erro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2020, 400]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "1. Webhook MAVO.AI": {
+      "main": [
+        [
+          {
+            "node": "2. Normalizar Dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Normalizar Dados": {
+      "main": [
+        [
+          {
+            "node": "3. Triagem WillTalk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Triagem WillTalk": {
+      "main": [
+        [
+          {
+            "node": "4. Triagem Completa?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Triagem Completa?": {
+      "main": [
+        [
+          {
+            "node": "5. Ingestão MAVO.AI",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "9. Log Triagem Pendente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. Ingestão MAVO.AI": {
+      "main": [
+        [
+          {
+            "node": "6. Gerar Resposta IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Gerar Resposta IA": {
+      "main": [
+        [
+          {
+            "node": "7. Enviar Resposta WillTalk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7. Enviar Resposta WillTalk": {
+      "main": [
+        [
+          {
+            "node": "8. Log Sucesso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "",
+    "saveManualExecutions": true,
+    "timezone": "America/Sao_Paulo"
+  },
+  "staticData": null,
+  "tags": ["mavoai", "willtalk", "cerebro", "ia", "whatsapp", "automacao"],
+  "versionId": "1.0"
+}

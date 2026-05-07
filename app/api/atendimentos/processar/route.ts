@@ -1,6 +1,6 @@
-import { createClient } from "@/lib/supabase/server"
 import { gerarTextoIA } from "@/lib/ai-provider"
 import { embeddingParaVector, gerarEmbedding } from "@/lib/embeddings"
+import { query } from "@/lib/database/postgres-client-no-vector"
 import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 
@@ -24,6 +24,7 @@ Regras:
 - Responda APENAS com o JSON, sem texto adicional`
 
 export async function POST(request: Request) {
+  let atendimentoId: string | null = null
   try {
     const internalToken = request.headers.get("X-Internal-Token")
     if (process.env.CEREBRO_INTERNAL_TOKEN && internalToken !== process.env.CEREBRO_INTERNAL_TOKEN) {
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
     }
 
     const { id, texto_original } = await request.json()
+    atendimentoId = id || null
 
     if (!id || !texto_original) {
       return NextResponse.json(
@@ -56,13 +58,10 @@ export async function POST(request: Request) {
       )
     }
 
-    const supabase = await createClient()
-
-    const { data: categorias } = await supabase
-      .from("categorias")
-      .select("id, nome")
-      .eq("nome", parsed.categoria)
-      .single()
+    const categorias = await query(
+      "SELECT id, nome FROM categorias WHERE nome = $1 LIMIT 1",
+      [parsed.categoria]
+    )
 
     let vector: string | null = null
     try {
@@ -78,60 +77,37 @@ export async function POST(request: Request) {
       })
     }
 
-    let { data, error } = await supabase
-      .from("atendimentos")
-      .update({
-        resumo: parsed.resumo,
-        resumo_problema: parsed.resumo || parsed.problema,
-        problema: parsed.problema,
-        causa: parsed.causa,
-        solucao: parsed.solucao,
-        categoria: parsed.categoria,
-        categoria_id: categorias?.id || null,
-        embedding: vector || undefined,
-        processado: true,
-      })
-      .eq("id", id)
-      .select()
-      .single()
-
-    // Fallback para schema antigo sem as colunas novas.
-    if (error) {
-      const fallback = await supabase
-        .from("atendimentos")
-        .update({
-          resumo: parsed.resumo,
-          problema: parsed.problema,
-          causa: parsed.causa,
-          solucao: parsed.solucao,
-          categoria_id: categorias?.id || null,
-          embedding: vector || undefined,
-          processado: true,
-        })
-        .eq("id", id)
-        .select()
-        .single()
-
-      data = fallback.data
-      error = fallback.error
-    }
-
-    if (error) {
-      logger.error("atendimento_update_failed", {
-        atendimentoId: id,
-        error: error.message,
-      })
-      return NextResponse.json(
-        { error: "Erro ao salvar atendimento processado" },
-        { status: 500 }
-      )
-    }
+    const data = await query(
+      `UPDATE atendimentos
+       SET resumo = $1,
+           resumo_problema = $2,
+           problema = $3,
+           causa = $4,
+           solucao = $5,
+           categoria = $6,
+           categoria_id = $7,
+           embedding = $8,
+           processado = TRUE
+       WHERE id = $9
+       RETURNING *`,
+      [
+        parsed.resumo,
+        parsed.resumo || parsed.problema,
+        parsed.problema,
+        parsed.causa,
+        parsed.solucao,
+        parsed.categoria,
+        categorias.rows[0]?.id || null,
+        vector ? Buffer.from(vector, "utf8") : null,
+        id,
+      ]
+    )
 
     logger.info("atendimento_processado", { atendimentoId: id })
-    return NextResponse.json({ data, processed: parsed })
+    return NextResponse.json({ data: data.rows[0] || null, processed: parsed })
   } catch (error) {
     logger.error("processamento_erro_critico", {
-      atendimentoId: id,
+      atendimentoId,
       error: error instanceof Error ? error.message : String(error),
     })
     return NextResponse.json(

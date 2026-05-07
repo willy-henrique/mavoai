@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server"
+import { query } from "@/lib/database/postgres-client-no-vector"
 import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 
@@ -6,133 +6,96 @@ export async function GET() {
   const now = new Date().toISOString()
 
   try {
-    const supabase = await createClient()
-
-    const cincoMinutosAtras = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-    const vintEquatroHorasAtras = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-
-    const [
-      { count: totalAtendimentos, error: e1 },
-      { count: processados, error: e2 },
-      { count: pendentes, error: e3 },
-      { data: porCategoria, error: e4 },
-      { data: porTecnico, error: e5 },
-      { count: comEmbedding, error: e6 },
-      { count: pendentesAcumulados, error: e7 },
-      { count: auditErrors24h, error: e8 },
-    ] = await Promise.all([
-      supabase.from("atendimentos").select("*", { count: "exact", head: true }),
-      supabase
-        .from("atendimentos")
-        .select("*", { count: "exact", head: true })
-        .eq("processado", true),
-      supabase
-        .from("atendimentos")
-        .select("*", { count: "exact", head: true })
-        .eq("processado", false),
-      supabase
-        .from("atendimentos")
-        .select("categoria_id, categorias(nome)")
-        .not("categoria_id", "is", null),
-      supabase.from("atendimentos").select("tecnico"),
-      // Processados que têm embedding gerado
-      supabase
-        .from("atendimentos")
-        .select("*", { count: "exact", head: true })
-        .eq("processado", true)
-        .not("embedding", "is", null),
-      // Pendentes de processamento há mais de 5 minutos (backlog preocupante)
-      supabase
-        .from("atendimentos")
-        .select("*", { count: "exact", head: true })
-        .eq("processado", false)
-        .lt("created_at", cincoMinutosAtras),
-      // Erros de auditoria nas últimas 24h
-      supabase
-        .from("audit_events")
-        .select("*", { count: "exact", head: true })
-        .eq("severity", "error")
-        .gte("created_at", vintEquatroHorasAtras),
+    const [totais, porCategoria, porTecnico, porDia, ultimasIngestoes, auditErrors] = await Promise.all([
+      query(
+        `SELECT
+          COUNT(*)::int AS total_atendimentos,
+          COUNT(*) FILTER (WHERE processado = true)::int AS processados,
+          COUNT(*) FILTER (WHERE processado = false)::int AS pendentes,
+          COUNT(*) FILTER (WHERE processado = true AND embedding IS NOT NULL)::int AS com_embedding,
+          COUNT(*) FILTER (
+            WHERE processado = false
+              AND created_at < NOW() - INTERVAL '5 minutes'
+          )::int AS pendentes_acumulados
+        FROM atendimentos`
+      ),
+      query(
+        `SELECT COALESCE(categoria, 'Sem categoria') AS nome, COUNT(*)::int AS total
+         FROM atendimentos
+         WHERE processado = true
+         GROUP BY 1
+         ORDER BY total DESC`
+      ),
+      query(
+        `SELECT tecnico AS nome, COUNT(*)::int AS total
+         FROM atendimentos
+         GROUP BY tecnico
+         ORDER BY total DESC
+         LIMIT 10`
+      ),
+      query(
+        `SELECT TO_CHAR(data_atendimento::date, 'DD/MM/YYYY') AS data, COUNT(*)::int AS total
+         FROM atendimentos
+         WHERE data_atendimento >= NOW() - INTERVAL '7 days'
+         GROUP BY data_atendimento::date
+         ORDER BY data_atendimento::date ASC`
+      ),
+      query(
+        `SELECT id, origem, status, created_at, detalhes
+         FROM ingestao_logs
+         ORDER BY created_at DESC
+         LIMIT 5`
+      ),
+      query(
+        `SELECT
+          CASE
+            WHEN to_regclass('public.audit_events') IS NULL THEN NULL::int
+            ELSE (
+              SELECT COUNT(*)::int
+              FROM audit_events
+              WHERE severity = 'error'
+                AND created_at >= NOW() - INTERVAL '24 hours'
+            )
+          END AS total`
+      ),
     ])
 
-    const supabaseError = e1 || e2 || e3 || e4 || e5
-    if (supabaseError) {
-      logger.warn("supabase_parcialmente_indisponivel", { error: supabaseError.message })
-    }
-
-    const categoriaCount: Record<string, number> = {}
-    porCategoria?.forEach((item) => {
-      const nome =
-        (item.categorias as { nome: string } | null)?.nome || "Sem categoria"
-      categoriaCount[nome] = (categoriaCount[nome] || 0) + 1
-    })
-
-    const tecnicoCount: Record<string, number> = {}
-    porTecnico?.forEach((item) => {
-      tecnicoCount[item.tecnico] = (tecnicoCount[item.tecnico] || 0) + 1
-    })
-
-    const hoje = new Date()
-    const ultimos7Dias = new Date(hoje.getTime() - 7 * 24 * 60 * 60 * 1000)
-
-    const { data: atendimentosPorDia } = await supabase
-      .from("atendimentos")
-      .select("data_atendimento")
-      .gte("data_atendimento", ultimos7Dias.toISOString())
-
-    const porDia: Record<string, number> = {}
-    atendimentosPorDia?.forEach((item) => {
-      const dia = new Date(item.data_atendimento).toLocaleDateString("pt-BR")
-      porDia[dia] = (porDia[dia] || 0) + 1
-    })
-
-    const { data: ultimasIngestoes } = await supabase
-      .from("ingestao_logs")
-      .select("id, origem, status, created_at, detalhes")
-      .order("created_at", { ascending: false })
-      .limit(5)
-
-    const totalProcessados = processados || 0
-    const totalComEmbedding = comEmbedding || 0
+    const totalAtendimentos = Number(totais.rows[0]?.total_atendimentos || 0)
+    const totalProcessados = Number(totais.rows[0]?.processados || 0)
+    const pendentes = Number(totais.rows[0]?.pendentes || 0)
+    const totalComEmbedding = Number(totais.rows[0]?.com_embedding || 0)
+    const pendentesAcumulados = Number(totais.rows[0]?.pendentes_acumulados || 0)
+    const auditErrors24h =
+      auditErrors.rows[0]?.total == null
+        ? null
+        : Number(auditErrors.rows[0]?.total || 0)
     const embeddingCoverage = totalProcessados > 0
       ? Math.round((totalComEmbedding / totalProcessados) * 100) / 100
       : null
 
     return NextResponse.json({
-      supabaseOnline: true,
+      supabaseOnline: true, // legado para frontend
       ultimaAtualizacao: now,
-      totalAtendimentos: totalAtendimentos || 0,
+      totalAtendimentos,
       processados: totalProcessados,
-      pendentes: pendentes || 0,
+      pendentes,
       // Observabilidade do cérebro
       saude: {
         embedding_coverage: embeddingCoverage,
         com_embedding: totalComEmbedding,
-        pendentes_acumulados: pendentesAcumulados || 0,
-        audit_errors_24h: e8 ? null : (auditErrors24h || 0),
+        pendentes_acumulados: pendentesAcumulados,
+        audit_errors_24h: auditErrors24h,
         alerta_embedding: embeddingCoverage !== null && embeddingCoverage < 0.7,
-        alerta_backlog: (pendentesAcumulados || 0) > 20,
-        alerta_erros: !e8 && (auditErrors24h || 0) > 10,
+        alerta_backlog: pendentesAcumulados > 20,
+        alerta_erros: (auditErrors24h || 0) > 10,
       },
-      porCategoria: Object.entries(categoriaCount).map(([nome, total]) => ({
-        nome,
-        total,
-      })),
-      porTecnico: Object.entries(tecnicoCount)
-        .map(([nome, total]) => ({ nome, total }))
-        .sort((a, b) => b.total - a.total)
-        .slice(0, 10),
-      porDia: Object.entries(porDia)
-        .map(([data, total]) => ({ data, total }))
-        .sort(
-          (a, b) =>
-            new Date(a.data.split("/").reverse().join("-")).getTime() -
-            new Date(b.data.split("/").reverse().join("-")).getTime()
-        ),
-      ultimasIngestoes: ultimasIngestoes || [],
+      porCategoria: porCategoria.rows || [],
+      porTecnico: porTecnico.rows || [],
+      porDia: porDia.rows || [],
+      ultimasIngestoes: ultimasIngestoes.rows || [],
     })
   } catch (error) {
-    logger.error("metricas_supabase_offline", {
+    logger.error("metricas_postgres_offline", {
       error: error instanceof Error ? error.message : String(error),
     })
     return NextResponse.json({

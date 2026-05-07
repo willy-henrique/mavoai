@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server"
+import { query } from "@/lib/database/postgres-client-no-vector"
 import { embeddingParaVector, gerarEmbedding } from "@/lib/embeddings"
 import { NextResponse } from "next/server"
 
@@ -12,47 +12,75 @@ export async function GET(request: Request) {
   const limit = parseInt(searchParams.get("limit") || "50")
   const offset = parseInt(searchParams.get("offset") || "0")
 
-  const supabase = await createClient()
+  try {
+    const where: string[] = []
+    const params: unknown[] = []
 
-  let query = supabase
-    .from("atendimentos")
-    .select("*, categorias(id, nome)", { count: "exact" })
-    .order("data_atendimento", { ascending: false })
-    .range(offset, offset + limit - 1)
+    if (tecnico) {
+      params.push(`%${tecnico}%`)
+      where.push(`a.tecnico ILIKE $${params.length}`)
+    }
+    if (categoria) {
+      params.push(categoria)
+      where.push(`a.categoria_id = $${params.length}::uuid`)
+    }
+    if (dataInicio) {
+      params.push(dataInicio)
+      where.push(`a.data_atendimento >= $${params.length}::timestamptz`)
+    }
+    if (dataFim) {
+      params.push(dataFim)
+      where.push(`a.data_atendimento <= $${params.length}::timestamptz`)
+    }
+    if (busca) {
+      params.push(`%${busca}%`)
+      const p = `$${params.length}`
+      where.push(`(
+        a.texto_original ILIKE ${p}
+        OR a.problema ILIKE ${p}
+        OR a.solucao ILIKE ${p}
+        OR a.resumo ILIKE ${p}
+      )`)
+    }
 
-  if (tecnico) {
-    query = query.ilike("tecnico", `%${tecnico}%`)
-  }
-
-  if (categoria) {
-    query = query.eq("categoria_id", categoria)
-  }
-
-  if (dataInicio) {
-    query = query.gte("data_atendimento", dataInicio)
-  }
-
-  if (dataFim) {
-    query = query.lte("data_atendimento", dataFim)
-  }
-
-  if (busca) {
-    query = query.or(
-      `texto_original.ilike.%${busca}%,problema.ilike.%${busca}%,solucao.ilike.%${busca}%,resumo.ilike.%${busca}%`
+    const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""
+    const countResult = await query(
+      `SELECT COUNT(*)::int AS total
+       FROM atendimentos a
+       ${whereSql}`,
+      params
     )
-  }
+    const total = Number(countResult.rows[0]?.total || 0)
 
-  const { data, error, count } = await query
+    params.push(limit, offset)
+    const dataResult = await query(
+      `SELECT
+         a.*,
+         c.id AS categorias_id,
+         c.nome AS categorias_nome
+       FROM atendimentos a
+       LEFT JOIN categorias c ON c.id = a.categoria_id
+       ${whereSql}
+       ORDER BY a.data_atendimento DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    )
 
-  if (error) {
+    const data = dataResult.rows.map((row: any) => ({
+      ...row,
+      categorias: row.categorias_id
+        ? { id: row.categorias_id, nome: row.categorias_nome }
+        : undefined,
+    }))
+
+    return NextResponse.json({ data, total })
+  } catch (error) {
     console.error("Erro ao buscar atendimentos:", error)
     return NextResponse.json(
       { error: "Erro ao buscar atendimentos" },
       { status: 500 }
     )
   }
-
-  return NextResponse.json({ data, total: count })
 }
 
 export async function POST(request: Request) {
@@ -74,8 +102,6 @@ export async function POST(request: Request) {
       )
     }
 
-    const supabase = await createClient()
-
     let vector: string | null = null
     try {
       const embedding = await gerarEmbedding(texto_original)
@@ -84,50 +110,25 @@ export async function POST(request: Request) {
       console.warn("Embedding nao gerado no cadastro:", embeddingError)
     }
 
-    let { data, error } = await supabase
-      .from("atendimentos")
-      .insert({
+    const created = await query(
+      `INSERT INTO atendimentos (
+        cliente, tecnico, ticket_externo, canal, texto_original,
+        resumo_problema, embedding, data_atendimento
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *`,
+      [
         cliente,
         tecnico,
-        ticket_externo: ticket_externo || null,
-        canal: canal || null,
+        ticket_externo || null,
+        canal || null,
         texto_original,
-        resumo_problema: texto_original,
-        embedding: vector || undefined,
-        data_atendimento: data_atendimento || new Date().toISOString(),
-      })
-      .select()
-      .single()
+        texto_original,
+        vector ? Buffer.from(vector, "utf8") : null,
+        data_atendimento || new Date().toISOString(),
+      ]
+    )
 
-    // Fallback para schema antigo sem resumo_problema.
-    if (error) {
-      const fallback = await supabase
-        .from("atendimentos")
-        .insert({
-          cliente,
-          tecnico,
-          ticket_externo: ticket_externo || null,
-          canal: canal || null,
-          texto_original,
-          embedding: vector || undefined,
-          data_atendimento: data_atendimento || new Date().toISOString(),
-        })
-        .select()
-        .single()
-
-      data = fallback.data
-      error = fallback.error
-    }
-
-    if (error) {
-      console.error("Erro ao criar atendimento:", error)
-      return NextResponse.json(
-        { error: "Erro ao criar atendimento" },
-        { status: 500 }
-      )
-    }
-
-    return NextResponse.json({ data })
+    return NextResponse.json({ data: created.rows[0] })
   } catch (error) {
     console.error("Erro:", error)
     return NextResponse.json(

@@ -1,0 +1,413 @@
+{
+  "name": "n8n-07-03-versao1",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mavoai-ingest-v1",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node_webhook",
+      "name": "1. Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $json.body && typeof $json.body === 'object' ? { ...$json, ...$json.body } : $json;\n\nfunction toText(v) {\n  if (v == null) return '';\n  if (typeof v === 'string') return v;\n  if (Array.isArray(v)) return v.map(toText).join(' ');\n  if (typeof v === 'object') return toText(v.text || v.mensagem || v.content || '');\n  return String(v);\n}\n\nconst mensagem = toText(src.mensagem || src.mensagens || src.message || '').replace(/\\s+/g, ' ').trim();\nif (!mensagem) throw new Error('Mensagem vazia no payload');\n\nconst ticketId = String(src.ticket_id || src.ticket?.id || src.conversation_id || `WT-${Date.now()}`).trim();\nconst clienteNome = String(src.cliente || src.contact?.name || src.customer?.name || 'Cliente').trim();\nconst clienteTelefone = String(src.cliente_telefone || src.phone || src.contact?.phoneNumber || src.from || '').trim();\n\nreturn [{\n  json: {\n    ticket_id: ticketId,\n    cliente: clienteNome,\n    cliente_telefone: clienteTelefone,\n    mensagens: mensagem,\n    canal: src.canal || 'whatsapp',\n    tecnico: src.tecnico || 'n8n',\n    data_evento: src.data_evento || src.timestamp || new Date().toISOString(),\n    triageCompleted: Boolean(src.triageCompleted),\n    organization_id: src.organization_id || src.organizationId || null,\n    event_id: src.event_id || `evt-${Date.now()}`\n  }\n}];"
+      },
+      "id": "node_normalizar",
+      "name": "2. Normalizar Dados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WILLTALK_URL || 'http://localhost:4002' }}/api/webhooks/n8n/ticket-upsert",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event_id: $json.event_id, canal: $json.canal, organization_id: $json.organization_id || undefined, cliente: { nome: $json.cliente, telefone: $json.cliente_telefone }, mensagem: $json.mensagens, ticket_id: $json.ticket_id }) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + ($env.WILLTALK_TOKEN || '9e24439a849860fd74f93190df8b5ebb8c2bc7922beceba5020b8a335f45e3e1') }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "node_triagem_willtalk",
+      "name": "3. Triagem WillTalk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [730, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.triageCompleted }}",
+              "operation": "equal",
+              "value2": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node_if_triagem",
+      "name": "4. Triagem Completa?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.1,
+      "position": [980, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MAVOAI_URL || 'http://localhost:3000' }}/api/ingestao/willtalk",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ticket_id: $('2. Normalizar Dados').item.json.ticket_id, cliente: $('2. Normalizar Dados').item.json.cliente, canal: $('2. Normalizar Dados').item.json.canal, mensagens: $('2. Normalizar Dados').item.json.mensagens, tecnico: $('2. Normalizar Dados').item.json.tecnico, data_evento: $('2. Normalizar Dados').item.json.data_evento }) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + ($env.MAVOAI_TOKEN || '9e24439a849860fd74f93190df8b5ebb8c2bc7922beceba5020b8a335f45e3e1') }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Source-System",
+              "value": "willtalk"
+            },
+            {
+              "name": "X-Source-Entity-Id",
+              "value": "={{ $('2. Normalizar Dados').item.json.ticket_id }}"
+            },
+            {
+              "name": "X-Tenant-Id",
+              "value": "default"
+            },
+            {
+              "name": "X-Ingestion-Id",
+              "value": "={{ 'ing-' + Date.now() }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 12000
+        }
+      },
+      "id": "node_ingestao",
+      "name": "5. Ingestao MAVO.AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1240, 200],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equals",
+              "value2": "ok"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node_if_ingest_ok",
+      "name": "5.1 Ingestao OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.1,
+      "position": [1460, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MAVOAI_URL || 'http://localhost:3000' }}/api/resposta-assistida",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ texto: $('2. Normalizar Dados').item.json.mensagens, audience: 'cliente' }) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "node_gerar_resposta",
+      "name": "6. Gerar Resposta IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1690, 200],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $json || {};\nconst confianca = String(r.confianca || '').toLowerCase();\nconst resposta = String(r.resposta_sugerida || '').trim();\nconst enviar = resposta.length > 0 && (confianca === 'alta' || confianca === 'media');\n\nreturn [{ json: { ...r, enviar_resposta: enviar, motivo: enviar ? 'confianca_suficiente' : 'confianca_baixa_ou_sem_resposta' } }];"
+      },
+      "id": "node_decidir_envio",
+      "name": "6.1 Decidir Envio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1910, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.enviar_resposta }}",
+              "operation": "equal",
+              "value2": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node_if_enviar",
+      "name": "6.2 Enviar Resposta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.1,
+      "position": [2130, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WILLTALK_REPLY_URL || 'http://localhost:4002/api/webhooks/cerebro/reply' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ticket_id: $('2. Normalizar Dados').item.json.ticket_id, cliente: $('2. Normalizar Dados').item.json.cliente, canal: $('2. Normalizar Dados').item.json.canal, resposta_sugerida: $json.resposta_sugerida, origem: 'cerebro-operacional', data_evento: new Date().toISOString() }) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + ($env.WILLTALK_TOKEN || '9e24439a849860fd74f93190df8b5ebb8c2bc7922beceba5020b8a335f45e3e1') }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 12000
+        }
+      },
+      "id": "node_enviar_resposta",
+      "name": "7. Enviar Resposta WillTalk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2360, 120],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { status: 'sucesso', etapa: 'pipeline_concluida', ticket_id: $('2. Normalizar Dados').item.json.ticket_id, atendimento_id: $('5.1 Ingestao OK?').item.json.atendimento_id || null, confianca: $('6.1 Decidir Envio').item.json.confianca || null, resposta_enviada: $('6.1 Decidir Envio').item.json.enviar_resposta || false, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "node_log_sucesso",
+      "name": "8. Log Sucesso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2580, 120]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { status: 'triagem_pendente', motivo: 'triagemCompleted=false', ticket_id: $('2. Normalizar Dados').item.json.ticket_id, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "node_log_triagem",
+      "name": "9. Log Triagem Pendente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1240, 430]
+    },
+    {
+      "parameters": {
+        "jsCode": "const origem = $input.first().json || {};\nreturn [{ json: { status: 'erro', etapa: 'pipeline', erro: origem.error || origem.message || 'falha_na_integracao', detalhe: origem, ticket_id: $('2. Normalizar Dados').item.json.ticket_id || null, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "node_tratar_erro",
+      "name": "10. Tratar Erro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2580, 300]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "1. Webhook": {
+      "main": [
+        [
+          {
+            "node": "2. Normalizar Dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Normalizar Dados": {
+      "main": [
+        [
+          {
+            "node": "3. Triagem WillTalk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Triagem WillTalk": {
+      "main": [
+        [
+          {
+            "node": "4. Triagem Completa?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Triagem Completa?": {
+      "main": [
+        [
+          {
+            "node": "5. Ingestao MAVO.AI",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "9. Log Triagem Pendente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. Ingestao MAVO.AI": {
+      "main": [
+        [
+          {
+            "node": "5.1 Ingestao OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5.1 Ingestao OK?": {
+      "main": [
+        [
+          {
+            "node": "6. Gerar Resposta IA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "10. Tratar Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Gerar Resposta IA": {
+      "main": [
+        [
+          {
+            "node": "6.1 Decidir Envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6.1 Decidir Envio": {
+      "main": [
+        [
+          {
+            "node": "6.2 Enviar Resposta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6.2 Enviar Resposta?": {
+      "main": [
+        [
+          {
+            "node": "7. Enviar Resposta WillTalk",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "8. Log Sucesso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7. Enviar Resposta WillTalk": {
+      "main": [
+        [
+          {
+            "node": "8. Log Sucesso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "tags": ["mavoai", "willtalk", "n8n", "cerebro", "postgres"]
+}
