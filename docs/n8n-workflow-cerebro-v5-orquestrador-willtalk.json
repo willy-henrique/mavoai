@@ -1,0 +1,354 @@
+{
+  "name": "cerebro_operacional_v5_orquestrador_willtalk",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cerebro-v5-willtalk",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node_webhook",
+      "name": "1. Webhook Entrada WillTalk",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [120, 360],
+      "notes": "Entrada do WillTalk para o fluxo v5. Este workflow deixa a inteligencia no Cerebro e usa o n8n como ponte operacional."
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $json || {};\nconst src = root.body && typeof root.body === 'object' && !Array.isArray(root.body) ? { ...root, ...root.body } : root;\nfunction toText(v) { if (v == null) return ''; if (typeof v === 'string') return v; if (typeof v === 'number' || typeof v === 'boolean') return String(v); if (Array.isArray(v)) return v.map(toText).filter(Boolean).join(' '); if (typeof v === 'object') return toText(v.text ?? v.mensagem ?? v.content ?? v.body ?? v.caption ?? ''); return String(v); }\nfunction pickCliente(input) { if (!input) return { nome: 'Cliente', telefone: '' }; if (typeof input === 'string') return { nome: input.trim() || 'Cliente', telefone: '' }; return { nome: String(input.nome || input.name || input.pushName || 'Cliente').trim() || 'Cliente', telefone: String(input.telefone || input.phone || input.phoneNumber || '').trim() }; }\nconst mensagem = toText(src.mensagem ?? src.mensagens ?? src.message ?? src.messages ?? src.text ?? src.body ?? '').replace(/\\s+/g, ' ').trim();\nif (!mensagem && !(src.media_url || src.mediaUrl || src.message?.mediaUrl || src.attachment?.url || src.image?.url)) throw new Error('Mensagem ou midia obrigatoria');\nconst clienteObj = pickCliente(src.cliente || src.customer || src.contact || null);\nconst telefone = String(src.cliente_telefone ?? src.telefone ?? src.phone ?? src.phoneNumber ?? src.contact?.phoneNumber ?? clienteObj.telefone ?? src.from ?? '').replace(/\\D/g, '');\nconst ticketId = String(src.ticket_id ?? src.ticket?.id ?? src.conversation_id ?? src.conversationId ?? src.chat_id ?? '').trim() || `WT-${Date.now()}`;\nconst conversationId = String(src.conversation_id ?? src.conversationId ?? src.ticket?.conversationId ?? src.ticket?.id ?? ticketId).trim() || ticketId;\nconst eventId = String(src.event_id ?? src.eventId ?? src.message_id ?? src.messageId ?? src.externalId ?? `evt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).trim();\nconst organizationId = String(src.organization_id ?? src.organizationId ?? src.tenant_id ?? src.tenantId ?? 'org_willtalk').trim();\nconst mediaUrl = src.media_url ?? src.mediaUrl ?? src.message?.mediaUrl ?? src.attachment?.url ?? src.image?.url ?? null;\nconst mimeType = src.mime_type ?? src.mimeType ?? src.message?.mimeType ?? src.attachment?.mime_type ?? src.image?.mime_type ?? null;\nreturn [{ json: { raw: src, platform: 'willtalk', sourceSystem: 'willtalk', tenantId: organizationId, sourceEntityId: eventId, ingestionId: eventId, ticket_id: ticketId, conversation_id: conversationId, event_id: eventId, organization_id: organizationId, cliente: { nome: clienteObj.nome, telefone }, cliente_nome: clienteObj.nome, cliente_telefone: telefone, mensagem, mensagens: mensagem, canal: 'whatsapp', media_url: mediaUrl, mime_type: mimeType, data_evento: src.data_evento ?? src.dataEvento ?? src.timestamp ?? new Date().toISOString(), business_hours_open: src.business_hours_open ?? src.horario_comercial_aberto ?? true } }];"
+      },
+      "id": "node_normalizar",
+      "name": "2. Normalizar Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [380, 360],
+      "notes": "Normalizacao robusta copiada dos fluxos funcionais, mantendo WillTalk como origem."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WILLTALK_URL || 'http://127.0.0.1:4002' }}/api/webhooks/n8n/ticket-upsert",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + ($env.WILLTALK_WEBHOOK_TOKEN || 'SEU_WILLTALK_WEBHOOK_TOKEN') }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event_id: $json.event_id, canal: 'whatsapp', organization_id: $json.organization_id || undefined, cliente: { nome: $json.cliente.nome, telefone: $json.cliente.telefone }, mensagem: $json.mensagem, ticket_id: $json.ticket_id || undefined, metadata: { source: 'cerebro-v5-orquestrador', phase: 'preflight_state' } }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "node_upsert_estado",
+      "name": "3. Upsert/Estado WillTalk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [650, 360],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "notes": "Mantem o WillTalk intacto: cria/atualiza ticket e tenta reaproveitar estado/filas retornados."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ String($json.action || $json.status || '') }}",
+              "operation": "regex",
+              "value2": "ignored_duplicate|duplicate|duplicado"
+            }
+          ]
+        }
+      },
+      "id": "node_if_duplicado",
+      "name": "4. Evento Duplicado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 360],
+      "notes": "Se o WillTalk informar duplicidade, encerra sem responder duas vezes."
+    },
+    {
+      "parameters": {
+        "jsCode": "const n = $('2. Normalizar Payload').item.json;\nconst wt = $json || {};\nconst meta = wt.metadata || wt.metadados || wt.conversation?.metadata || n.raw?.metadata || {};\nfunction bool(v, d = false) { if (typeof v === 'boolean') return v; if (v == null || v === '') return d; return ['true', '1', 'sim', 'yes'].includes(String(v).toLowerCase()); }\nfunction num(v, d = 0) { const x = Number(v); return Number.isFinite(x) ? x : d; }\nfunction strOrNull(v) { const s = String(v ?? '').trim(); return s || null; }\nconst rawQueues = wt.queues || wt.filas || wt.filas_disponiveis_json || wt.availableQueues || n.raw?.queues || n.raw?.filas || n.raw?.filas_disponiveis_json || [];\nlet queues = Array.isArray(rawQueues) ? rawQueues.map((q, i) => ({ id: String(q.id ?? q.queue_id ?? q.queueId ?? `fila-${i + 1}`), name: String(q.name ?? q.nome ?? q.label ?? `Fila ${i + 1}`), menu_option: num(q.menu_option ?? q.menuOption ?? q.option ?? i + 1, i + 1), default_sla_mins: num(q.default_sla_mins ?? q.defaultSlaMins ?? q.sla_mins ?? q.slaMins, 30), is_active: q.is_active ?? q.isActive ?? true })).filter((q) => q.id && q.name) : [];\nif (queues.length === 0) queues = [{ id: 'suporte-geral', name: 'Suporte Geral', menu_option: 1, default_sla_mins: 30, is_active: true }];\nconst conversation = { triage_completed: bool(wt.triageCompleted ?? wt.triage_completed ?? wt.conversation?.triage_completed ?? meta.triage_completed, false), menu_attempts: num(wt.menuAttempts ?? wt.menu_attempts ?? wt.conversation?.menu_attempts ?? meta.menu_attempts, 0), queue_id: strOrNull(wt.queueId ?? wt.queue_id ?? wt.conversation?.queue_id ?? meta.queue_id), menu_invalid_attempts: num(wt.menuInvalidAttempts ?? wt.menu_invalid_attempts ?? wt.conversation?.menu_invalid_attempts ?? meta.menu_invalid_attempts, 0), investigation_adequate_rounds: num(wt.investigationAdequateRounds ?? wt.investigation_adequate_rounds ?? wt.conversation?.investigation_adequate_rounds ?? meta.investigation_adequate_rounds, 0), investigation_messages_seen: num(wt.investigationMessagesSeen ?? wt.investigation_messages_seen ?? wt.conversation?.investigation_messages_seen ?? meta.investigation_messages_seen, 0) + 1, investigation_inadequate_streak: num(wt.investigationInadequateStreak ?? wt.investigation_inadequate_streak ?? wt.conversation?.investigation_inadequate_streak ?? meta.investigation_inadequate_streak, 0), resolution_active: bool(wt.resolutionActive ?? wt.resolution_active ?? wt.conversation?.resolution_active ?? meta.resolution_active, false), resolution_attempts: num(wt.resolutionAttempts ?? wt.resolution_attempts ?? wt.conversation?.resolution_attempts ?? meta.resolution_attempts, 0), resolution_problem_text: String(wt.resolutionProblemText ?? wt.resolution_problem_text ?? wt.conversation?.resolution_problem_text ?? meta.resolution_problem_text ?? ''), resolution_prev_solutions: String(wt.resolutionPrevSolutions ?? wt.resolution_prev_solutions ?? wt.conversation?.resolution_prev_solutions ?? meta.resolution_prev_solutions ?? '[]') };\nreturn [{ json: { ...n, willtalk_state: wt, queues, conversation, orchestrator_payload: { platform: 'willtalk', organization_id: n.organization_id, event_id: n.event_id, conversation_id: n.conversation_id, cliente: n.cliente, mensagem: n.mensagem, media_url: n.media_url, mime_type: n.mime_type, business_hours_open: bool(n.business_hours_open, true), conversation, queues } } }];"
+      },
+      "id": "node_preparar_orquestrador",
+      "name": "5. Preparar Payload Orquestrador",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 260],
+      "notes": "Monta o contrato do /api/orquestrador/v1/mensagem com estado e filas vindos do WillTalk."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CEREBRO_BASE_URL || 'http://127.0.0.1:3000' }}/api/orquestrador/v1/mensagem",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + ($env.CEREBRO_INGEST_TOKEN || 'SEU_CEREBRO_INGEST_TOKEN') }}" },
+            { "name": "X-Source-System", "value": "willtalk" },
+            { "name": "X-Source-Entity-Id", "value": "={{ $json.sourceEntityId }}" },
+            { "name": "X-Tenant-Id", "value": "={{ $json.tenantId }}" },
+            { "name": "X-Ingestion-Id", "value": "={{ $json.ingestionId }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.orchestrator_payload) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "node_cerebro_orquestrador",
+      "name": "6. Chamar Cerebro Orquestrador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1420, 260],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true,
+      "notes": "A inteligencia principal mora no Cerebro: triagem, investigacao, visao, resolucao e handoff."
+    },
+    {
+      "parameters": {
+        "jsCode": "const n = $('5. Preparar Payload Orquestrador').item.json;\nconst out = $json || {};\nconst failed = Boolean(out.error || out.statusCode >= 400 || (out.message && String(out.message).toLowerCase().includes('error')));\nconst safe = failed ? { reply_text: 'Nao consegui processar sua mensagem agora. Vou encaminhar para um atendente continuar por aqui.', triage_completed: true, menu_attempts: n.conversation.menu_attempts || 0, queue_id: n.conversation.queue_id || null, reason: 'orchestrator_error', agent_handoff_summary: `Falha ao consultar o Cerebro no fluxo n8n v5. Cliente: ${n.cliente.nome} (${n.cliente.telefone}). Mensagem: ${n.mensagem}` } : out;\nconst reason = String(safe.reason || 'unknown');\nconst handoffReasons = ['orchestrator_error', 'resolution_exhausted', 'resolution_client_requested_human', 'investigation_client_difficulty', 'investigation_failed_clarification', 'investigation_exhausted_no_evidence', 'no_queues', 'internal_error'];\nconst human_handoff = Boolean(safe.agent_handoff_summary || handoffReasons.includes(reason));\nconst triage_completed = Boolean(safe.triage_completed);\nconst should_ingest = triage_completed || human_handoff || reason === 'resolved_by_ai';\nreturn [{ json: { ...n, ...safe, human_handoff, should_ingest, should_reply: Boolean(String(safe.reply_text || '').trim()), orchestrator_failed: failed } }];"
+      },
+      "id": "node_normalizar_saida",
+      "name": "7. Normalizar Saida do Cerebro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 260],
+      "notes": "Se o Cerebro falhar, gera mensagem segura e handoff. Nunca manda agent_handoff_summary ao cliente."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WILLTALK_URL || 'http://127.0.0.1:4002' }}/api/webhooks/n8n/ticket-upsert",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + ($env.WILLTALK_WEBHOOK_TOKEN || 'SEU_WILLTALK_WEBHOOK_TOKEN') }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event_id: $json.event_id, canal: 'whatsapp', organization_id: $json.organization_id, cliente: $json.cliente, mensagem: $json.mensagem, ticket_id: $json.ticket_id, queue_id: $json.queue_id || undefined, metadata: { source: 'cerebro-v5-orquestrador', reply_text: String($json.reply_text || ''), triage_completed: String($json.triage_completed ?? false), menu_attempts: String($json.menu_attempts ?? 0), menu_invalid_attempts: String($json.menu_invalid_attempts ?? 0), investigation_adequate_rounds: String($json.investigation_adequate_rounds ?? 0), investigation_inadequate_streak: String($json.investigation_inadequate_streak ?? 0), resolution_active: String($json.resolution_active ?? false), resolution_attempts: String($json.resolution_attempts ?? 0), resolution_problem_text: String($json.resolution_problem_text || ''), resolution_prev_solutions: String($json.resolution_prev_solutions || '[]'), human_handoff: String($json.human_handoff ?? false), agent_handoff_summary: String($json.agent_handoff_summary || ''), cerebro_reason: String($json.reason || '') } }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "node_aplicar_estado",
+      "name": "8. Aplicar Estado no WillTalk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1940, 260],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "notes": "Persiste no WillTalk o estado decidido pelo Cerebro. Resumo interno fica em metadata, nao no texto enviado ao cliente."
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $('7. Normalizar Saida do Cerebro').item.json }];"
+      },
+      "id": "node_recuperar_saida",
+      "name": "9. Recuperar Saida Cerebro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 260]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.should_ingest === true }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "node_if_ingestao",
+      "name": "10. Alimentar RAG?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2460, 260],
+      "notes": "Somente alimenta RAG quando ha triagem completa, resolucao ou handoff."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CEREBRO_BASE_URL || 'http://127.0.0.1:3000' }}/api/ingestao/willtalk",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + ($env.CEREBRO_INGEST_TOKEN || 'SEU_CEREBRO_INGEST_TOKEN') }}" },
+            { "name": "X-Source-System", "value": "willtalk" },
+            { "name": "X-Source-Entity-Id", "value": "={{ $json.sourceEntityId }}" },
+            { "name": "X-Tenant-Id", "value": "={{ $json.tenantId }}" },
+            { "name": "X-Ingestion-Id", "value": "={{ $json.ingestionId }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ticket_id: $json.ticket_id, cliente: $json.cliente.nome, canal: 'whatsapp', tecnico: 'cerebro-v5-orquestrador', data_evento: $json.data_evento, mensagens: $json.mensagem, queue_id: $json.queue_id || null, triage_completed: $json.triage_completed, human_handoff: $json.human_handoff, metadata: { sourceSystem: 'willtalk', sourceEntityId: $json.sourceEntityId, tenantId: $json.tenantId, ingestionId: $json.ingestionId, reply_text: $json.reply_text || '', triage_completed: String($json.triage_completed ?? false), human_handoff: String($json.human_handoff ?? false), confidence: String($json.confidence ?? ''), resumo_triagem: String($json.agent_handoff_summary || $json.reason || '') } }) }}",
+        "options": { "timeout": 20000 }
+      },
+      "id": "node_alimentar_rag",
+      "name": "11. Alimentar Cerebro RAG",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2720, 160],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $('9. Recuperar Saida Cerebro').item.json }];"
+      },
+      "id": "node_recuperar_pos_rag",
+      "name": "12. Recuperar Saida Pos RAG",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2980, 160]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.should_reply === true }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "node_if_reply",
+      "name": "13. Enviar Resposta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [3240, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WILLTALK_REPLY_URL || $env.WILLTALK_REPLY_WEBHOOK_URL || (($env.WILLTALK_URL || 'http://127.0.0.1:4002') + '/api/webhooks/cerebro/reply') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + ($env.WILLTALK_WEBHOOK_TOKEN || 'SEU_WILLTALK_WEBHOOK_TOKEN') }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ticket_id: $json.ticket_id, cliente: $json.cliente.nome, canal: 'whatsapp', resposta_sugerida: $json.reply_text, origem: 'cerebro-operacional-v5', data_evento: $now }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "node_reply_willtalk",
+      "name": "14. Enviar Resposta WillTalk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3500, 160],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true,
+      "notes": "Envia somente reply_text ao cliente. agent_handoff_summary nunca sai por aqui."
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = $('9. Recuperar Saida Cerebro').item.json;\nreturn [{ json: { status: 'v5_concluido', ticket_id: out.ticket_id, conversation_id: out.conversation_id, reason: out.reason, queue_id: out.queue_id || null, triage_completed: out.triage_completed, human_handoff: out.human_handoff, reply_sent: out.should_reply, should_ingest: out.should_ingest, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "node_log_sucesso",
+      "name": "15. Log Sucesso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3760, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "const n = $('2. Normalizar Payload').item.json;\nreturn [{ json: { status: 'duplicate_ignored', ticket_id: n.ticket_id, conversation_id: n.conversation_id, message: 'Evento duplicado ignorado antes de chamar o Cerebro', timestamp: new Date().toISOString() } }];"
+      },
+      "id": "node_log_duplicado",
+      "name": "16. Log Duplicado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 520]
+    }
+  ],
+  "connections": {
+    "1. Webhook Entrada WillTalk": {
+      "main": [[{ "node": "2. Normalizar Payload", "type": "main", "index": 0 }]]
+    },
+    "2. Normalizar Payload": {
+      "main": [[{ "node": "3. Upsert/Estado WillTalk", "type": "main", "index": 0 }]]
+    },
+    "3. Upsert/Estado WillTalk": {
+      "main": [[{ "node": "4. Evento Duplicado?", "type": "main", "index": 0 }]]
+    },
+    "4. Evento Duplicado?": {
+      "main": [
+        [{ "node": "16. Log Duplicado", "type": "main", "index": 0 }],
+        [{ "node": "5. Preparar Payload Orquestrador", "type": "main", "index": 0 }]
+      ]
+    },
+    "5. Preparar Payload Orquestrador": {
+      "main": [[{ "node": "6. Chamar Cerebro Orquestrador", "type": "main", "index": 0 }]]
+    },
+    "6. Chamar Cerebro Orquestrador": {
+      "main": [[{ "node": "7. Normalizar Saida do Cerebro", "type": "main", "index": 0 }]]
+    },
+    "7. Normalizar Saida do Cerebro": {
+      "main": [[{ "node": "8. Aplicar Estado no WillTalk", "type": "main", "index": 0 }]]
+    },
+    "8. Aplicar Estado no WillTalk": {
+      "main": [[{ "node": "9. Recuperar Saida Cerebro", "type": "main", "index": 0 }]]
+    },
+    "9. Recuperar Saida Cerebro": {
+      "main": [[{ "node": "10. Alimentar RAG?", "type": "main", "index": 0 }]]
+    },
+    "10. Alimentar RAG?": {
+      "main": [
+        [{ "node": "11. Alimentar Cerebro RAG", "type": "main", "index": 0 }],
+        [{ "node": "13. Enviar Resposta?", "type": "main", "index": 0 }]
+      ]
+    },
+    "11. Alimentar Cerebro RAG": {
+      "main": [[{ "node": "12. Recuperar Saida Pos RAG", "type": "main", "index": 0 }]]
+    },
+    "12. Recuperar Saida Pos RAG": {
+      "main": [[{ "node": "13. Enviar Resposta?", "type": "main", "index": 0 }]]
+    },
+    "13. Enviar Resposta?": {
+      "main": [
+        [{ "node": "14. Enviar Resposta WillTalk", "type": "main", "index": 0 }],
+        [{ "node": "15. Log Sucesso", "type": "main", "index": 0 }]
+      ]
+    },
+    "14. Enviar Resposta WillTalk": {
+      "main": [[{ "node": "15. Log Sucesso", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": ["willtalk", "cerebro", "orquestrador", "v5", "homologacao"],
+  "_instrucoes": {
+    "status": "Novo fluxo principal recomendado para homologacao. Nao substitui v2/v3/v4 automaticamente.",
+    "webhook_url": "Apos ativar: http://SEU-N8N:5678/webhook/cerebro-v5-willtalk",
+    "variaveis_ambiente_n8n": {
+      "WILLTALK_URL": "http://127.0.0.1:4002",
+      "WILLTALK_WEBHOOK_TOKEN": "Bearer usado pelas rotas do WillTalk",
+      "WILLTALK_REPLY_URL": "Opcional; padrao: WILLTALK_URL + /api/webhooks/cerebro/reply",
+      "CEREBRO_BASE_URL": "http://127.0.0.1:3000 ou URL Render",
+      "CEREBRO_INGEST_TOKEN": "Mesmo token do CEREBRO_INGEST_TOKEN no Cérebro"
+    },
+    "regra_de_ouro": "n8n coordena; Cérebro decide; WillTalk envia e persiste canal/ticket."
+  }
+}

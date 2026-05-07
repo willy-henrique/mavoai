@@ -1,28 +1,62 @@
 "use client"
 
 import { useState } from "react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Activity,
+  Bell,
+  BrainCircuit,
+  Database,
+  LayoutDashboard,
+  List,
+  Plus,
+  Search,
+  Settings2,
+  ShieldCheck,
+  Sparkles,
+  UserRound,
+} from "lucide-react"
 import { AtendimentoForm } from "@/components/atendimento-form"
 import { AtendimentosList } from "@/components/atendimentos-list"
 import { Dashboard } from "@/components/dashboard"
+import { GroqMotorStrip } from "@/components/groq-motor-strip"
 import { SearchConsole } from "@/components/search-console"
 import { SettingsPanel } from "@/components/settings-panel"
-import {
-  LayoutDashboard,
-  Plus,
-  List,
-  Search,
-  Settings2,
-  BrainCircuit,
-} from "lucide-react"
-import { GroqMotorStrip } from "@/components/groq-motor-strip"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 const NAV_TABS = [
-  { value: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { value: "buscar", label: "Buscar", icon: Search },
-  { value: "cadastrar", label: "Cadastrar", icon: Plus },
-  { value: "atendimentos", label: "Atendimentos", icon: List },
-  { value: "configuracoes", label: "Configurações", icon: Settings2 },
+  {
+    value: "dashboard",
+    label: "Dashboard",
+    description: "Visão geral",
+    icon: LayoutDashboard,
+  },
+  {
+    value: "buscar",
+    label: "Buscar",
+    description: "Base RAG",
+    icon: Search,
+  },
+  {
+    value: "cadastrar",
+    label: "Cadastrar",
+    description: "Novo caso",
+    icon: Plus,
+  },
+  {
+    value: "atendimentos",
+    label: "Atendimentos",
+    description: "Histórico",
+    icon: List,
+  },
+  {
+    value: "configuracoes",
+    label: "Configurações",
+    description: "Operação",
+    icon: Settings2,
+  },
 ]
 
 export default function Home() {
@@ -33,74 +67,219 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
-        <div className="container mx-auto flex h-14 items-center gap-3 px-4">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <BrainCircuit className="h-4.5 w-4.5" />
+    <Tabs
+      defaultValue="dashboard"
+      className="min-h-screen gap-0 bg-[radial-gradient(circle_at_top_left,hsl(171_74%_96%),transparent_34rem),linear-gradient(180deg,hsl(215_35%_97%),hsl(210_30%_99%))] text-slate-950 lg:grid lg:grid-cols-[17.5rem_minmax(0,1fr)]"
+    >
+      <aside className="hidden min-h-screen border-r border-slate-200/80 bg-slate-950 text-white shadow-2xl shadow-slate-950/10 lg:flex lg:flex-col">
+        <div className="flex h-20 items-center gap-3 border-b border-white/10 px-5">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-400/20">
+            <BrainCircuit className="size-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="truncate text-base font-bold tracking-tight">
+                Mavo AI
+              </span>
+              <span className="text-xs font-semibold text-emerald-300">
+                Core
+              </span>
             </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-              <div className="flex flex-col leading-none">
-                <span className="text-sm font-bold tracking-tight">Mavo AI</span>
-                <span className="text-[10px] text-muted-foreground hidden sm:block">
-                  Inteligência operacional
-                </span>
-              </div>
-              <GroqMotorStrip
-                variant="header"
-                className="hidden min-w-0 border-l border-border pl-0 sm:flex sm:pl-3"
-              />
-            </div>
+            <p className="truncate text-xs text-slate-400">
+              Cérebro operacional
+            </p>
           </div>
         </div>
-      </header>
 
-      <div className="border-b bg-muted/15 px-4 py-2 sm:hidden">
-        <GroqMotorStrip variant="subtle" />
-      </div>
+        <div className="px-4 py-5">
+          <TabsList className="flex h-auto w-full flex-col items-stretch gap-1 rounded-none bg-transparent p-0">
+            {NAV_TABS.map(({ value, label, description, icon: Icon }) => (
+              <TabsTrigger
+                key={value}
+                value={value}
+                className="group h-12 justify-start gap-3 rounded-lg border border-transparent px-3 text-left text-slate-300 shadow-none transition-colors hover:bg-white/[0.07] hover:text-white data-[state=active]:border-emerald-300/25 data-[state=active]:bg-emerald-400/12 data-[state=active]:text-emerald-100 data-[state=active]:shadow-none"
+              >
+                <Icon className="size-4 text-slate-400 transition-colors group-data-[state=active]:text-emerald-300" />
+                <span className="grid min-w-0 flex-1 gap-0.5">
+                  <span className="truncate text-sm font-semibold">
+                    {label}
+                  </span>
+                  <span className="truncate text-[11px] font-normal text-slate-500 group-data-[state=active]:text-emerald-200/70">
+                    {description}
+                  </span>
+                </span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
-      {/* Main */}
-      <main className="container mx-auto px-4 py-6">
-        <Tabs defaultValue="dashboard">
-          {/* Tab bar */}
-          <div className="mb-6 border-b">
-            <TabsList className="h-auto gap-0 rounded-none bg-transparent p-0">
+        <div className="mt-auto space-y-4 border-t border-white/10 p-4">
+          <div className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-300">
+                Runtime
+              </span>
+              <Badge className="border-emerald-300/20 bg-emerald-300/10 text-emerald-200">
+                Online
+              </Badge>
+            </div>
+            <GroqMotorStrip variant="subtle" className="text-slate-400" />
+          </div>
+          <Button
+            variant="ghost"
+            className="h-10 w-full justify-start gap-2 rounded-lg text-slate-300 hover:bg-white/[0.07] hover:text-white"
+          >
+            <ShieldCheck className="size-4" />
+            Produção segura
+          </Button>
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-col">
+        <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/86 backdrop-blur-xl">
+          <div className="flex min-h-16 items-center gap-3 px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center gap-3 lg:hidden">
+              <div className="flex size-9 items-center justify-center rounded-lg bg-slate-950 text-emerald-300">
+                <BrainCircuit className="size-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-slate-950">
+                  Mavo AI
+                </p>
+                <p className="truncate text-[11px] text-slate-500">
+                  Cérebro operacional
+                </p>
+              </div>
+            </div>
+
+            <div className="relative hidden w-full max-w-md sm:block">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                className="h-10 rounded-full border-slate-200 bg-slate-100/80 pl-9 shadow-none focus-visible:bg-white"
+                placeholder="Buscar atendimento, cliente ou categoria..."
+              />
+            </div>
+
+            <div className="ml-auto flex items-center gap-2">
+              <div className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm md:flex">
+                <Activity className="size-3.5 text-emerald-500" />
+                Operação ativa
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-lg text-slate-600"
+              >
+                <Bell className="size-4" />
+              </Button>
+              <div className="hidden h-8 w-px bg-slate-200 sm:block" />
+              <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-3 shadow-sm">
+                <span className="flex size-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                  <UserRound className="size-4" />
+                </span>
+                <span className="hidden text-sm font-semibold text-slate-800 sm:inline">
+                  admin
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-100 px-4 py-2 lg:hidden">
+            <TabsList className="grid h-auto w-full grid-cols-5 gap-1 rounded-lg bg-slate-100 p-1">
               {NAV_TABS.map(({ value, label, icon: Icon }) => (
                 <TabsTrigger
                   key={value}
                   value={value}
-                  className="relative h-10 gap-2 rounded-none border-b-2 border-transparent px-4 pb-3 pt-2 text-sm font-medium text-muted-foreground transition-none data-[state=active]:border-primary data-[state=active]:text-foreground data-[state=active]:shadow-none hover:text-foreground"
+                  className="h-10 rounded-md px-1 text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm"
+                  title={label}
                 >
-                  <Icon className="h-4 w-4" />
-                  <span className="hidden sm:inline">{label}</span>
+                  <Icon className="size-4" />
+                  <span className="sr-only">{label}</span>
                 </TabsTrigger>
               ))}
             </TabsList>
           </div>
+        </header>
 
-          <TabsContent value="dashboard" className="mt-0">
-            <Dashboard />
-          </TabsContent>
+        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+          <div className="mx-auto w-full max-w-[92rem]">
+            <TabsContent value="dashboard" className="mt-0">
+              <Dashboard />
+            </TabsContent>
 
-          <TabsContent value="buscar" className="mt-0">
-            <SearchConsole />
-          </TabsContent>
+            <TabsContent value="buscar" className="mt-0">
+              <WorkspaceHeader
+                icon={Sparkles}
+                label="Consulta"
+                title="Busca operacional"
+                description="Respostas assistidas com base semântica."
+              />
+              <SearchConsole />
+            </TabsContent>
 
-          <TabsContent value="cadastrar" className="mt-0">
-            <AtendimentoForm onSuccess={handleAtendimentoCriado} />
-          </TabsContent>
+            <TabsContent value="cadastrar" className="mt-0">
+              <WorkspaceHeader
+                icon={Plus}
+                label="Registro"
+                title="Cadastrar atendimento"
+                description="Entrada manual de casos para alimentar o Cérebro."
+              />
+              <AtendimentoForm onSuccess={handleAtendimentoCriado} />
+            </TabsContent>
 
-          <TabsContent value="atendimentos" className="mt-0">
-            <AtendimentosList refreshKey={refreshKey} />
-          </TabsContent>
+            <TabsContent value="atendimentos" className="mt-0">
+              <WorkspaceHeader
+                icon={List}
+                label="Histórico"
+                title="Atendimentos"
+                description="Casos processados, pendentes e base de conhecimento."
+              />
+              <AtendimentosList refreshKey={refreshKey} />
+            </TabsContent>
 
-          <TabsContent value="configuracoes" className="mt-0">
-            <SettingsPanel />
-          </TabsContent>
-        </Tabs>
-      </main>
+            <TabsContent value="configuracoes" className="mt-0">
+              <WorkspaceHeader
+                icon={Database}
+                label="Sistema"
+                title="Configurações"
+                description="Saúde, integrações, banco e categorias."
+              />
+              <SettingsPanel />
+            </TabsContent>
+          </div>
+        </main>
+      </div>
+    </Tabs>
+  )
+}
+
+function WorkspaceHeader({
+  icon: Icon,
+  label,
+  title,
+  description,
+}: {
+  icon: typeof LayoutDashboard
+  label: string
+  title: string
+  description: string
+}) {
+  return (
+    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="space-y-2">
+        <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm">
+          <Icon className="size-3.5 text-emerald-600" />
+          {label}
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">
+            {title}
+          </h1>
+          <p className="mt-1 max-w-2xl text-sm text-slate-600">
+            {description}
+          </p>
+        </div>
+      </div>
     </div>
   )
 }

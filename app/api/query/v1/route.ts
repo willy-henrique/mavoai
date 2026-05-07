@@ -1,4 +1,8 @@
 import { gerarRespostaAssistidaComContexto } from "@/lib/assisted-response"
+import {
+  enforceRateLimit,
+  validateIntegrationHeaders,
+} from "@/lib/integration-guard"
 import { NextResponse } from "next/server"
 
 /**
@@ -12,6 +16,15 @@ import { NextResponse } from "next/server"
  */
 export async function POST(request: Request) {
   try {
+    const auth = validateIntegrationHeaders(request)
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status })
+    }
+    const rate = await enforceRateLimit(auth.tenantId, auth.sourceSystem)
+    if (!rate.ok) {
+      return NextResponse.json({ error: rate.error }, { status: rate.status })
+    }
+
     const body = await request.json()
     const texto: string = typeof body?.texto === "string" ? body.texto.trim() : ""
     const audience: "atendente" | "cliente" =
