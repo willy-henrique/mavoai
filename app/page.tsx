@@ -4,10 +4,14 @@ import { useState } from "react"
 import {
   Activity,
   Bell,
+  Brain,
   BrainCircuit,
+  Building2,
+  Command,
   Database,
   LayoutDashboard,
   List,
+  Network,
   Plus,
   Search,
   Settings2,
@@ -17,8 +21,12 @@ import {
 } from "lucide-react"
 import { AtendimentoForm } from "@/components/atendimento-form"
 import { AtendimentosList } from "@/components/atendimentos-list"
+import { CerebroGrafo } from "@/components/cerebro-grafo"
 import { Dashboard } from "@/components/dashboard"
+import { EmpresasPanel } from "@/components/empresas-panel"
 import { GroqMotorStrip } from "@/components/groq-motor-strip"
+import { HubPanel } from "@/components/hub-panel"
+import { PlatformasPanel } from "@/components/plataformas-panel"
 import { SearchConsole } from "@/components/search-console"
 import { SettingsPanel } from "@/components/settings-panel"
 import { Badge } from "@/components/ui/badge"
@@ -52,6 +60,30 @@ const NAV_TABS = [
     icon: List,
   },
   {
+    value: "plataformas",
+    label: "Plataformas",
+    description: "Integrações",
+    icon: Network,
+  },
+  {
+    value: "hub",
+    label: "Hub",
+    description: "Central de controle",
+    icon: Command,
+  },
+  {
+    value: "cerebro",
+    label: "Cérebro",
+    description: "Mapa de conhecimento",
+    icon: Brain,
+  },
+  {
+    value: "empresas",
+    label: "Empresas",
+    description: "Multi-empresa",
+    icon: Building2,
+  },
+  {
     value: "configuracoes",
     label: "Configurações",
     description: "Operação",
@@ -61,6 +93,7 @@ const NAV_TABS = [
 
 export default function Home() {
   const [refreshKey, setRefreshKey] = useState(0)
+  const [activeTab, setActiveTab] = useState("dashboard")
 
   const handleAtendimentoCriado = () => {
     setRefreshKey((prev) => prev + 1)
@@ -68,7 +101,8 @@ export default function Home() {
 
   return (
     <Tabs
-      defaultValue="dashboard"
+      value={activeTab}
+      onValueChange={setActiveTab}
       className="min-h-screen gap-0 bg-[radial-gradient(circle_at_top_left,hsl(171_74%_96%),transparent_34rem),linear-gradient(180deg,hsl(215_35%_97%),hsl(210_30%_99%))] text-slate-950 lg:grid lg:grid-cols-[17.5rem_minmax(0,1fr)]"
     >
       <aside className="hidden min-h-screen border-r border-slate-200/80 bg-slate-950 text-white shadow-2xl shadow-slate-950/10 lg:flex lg:flex-col">
@@ -185,7 +219,7 @@ export default function Home() {
           </div>
 
           <div className="border-t border-slate-100 px-4 py-2 lg:hidden">
-            <TabsList className="grid h-auto w-full grid-cols-5 gap-1 rounded-lg bg-slate-100 p-1">
+            <TabsList className="grid h-auto w-full grid-cols-9 gap-1 rounded-lg bg-slate-100 p-1">
               {NAV_TABS.map(({ value, label, icon: Icon }) => (
                 <TabsTrigger
                   key={value}
@@ -235,6 +269,46 @@ export default function Home() {
                 description="Casos processados, pendentes e base de conhecimento."
               />
               <AtendimentosList refreshKey={refreshKey} />
+            </TabsContent>
+
+            <TabsContent value="plataformas" className="mt-0">
+              <WorkspaceHeader
+                icon={Network}
+                label="Integrações"
+                title="Plataformas conectadas"
+                description="Monitore e gerencie as plataformas que enviam dados para o Cérebro."
+              />
+              <PlatformasPanel />
+            </TabsContent>
+
+            <TabsContent value="hub" className="mt-0">
+              <WorkspaceHeader
+                icon={Command}
+                label="Central"
+                title="Hub de Controle"
+                description="Acesse e configure todo o ecossistema Mavo AI em um só lugar."
+              />
+              <HubPanel />
+            </TabsContent>
+
+            <TabsContent value="cerebro" className="mt-0">
+              <WorkspaceHeader
+                icon={Brain}
+                label="Conhecimento"
+                title="Cérebro — Mapa de Conhecimento"
+                description="Visualize os domínios do AUGE ERP e as relações entre módulos."
+              />
+              <CerebroGrafo />
+            </TabsContent>
+
+            <TabsContent value="empresas" className="mt-0">
+              <WorkspaceHeader
+                icon={Building2}
+                label="Multi-empresa"
+                title="Empresas"
+                description="Cadastre empresas e importe o conhecimento de cada uma para o Cérebro."
+              />
+              <EmpresasPanel onNavigateToCerebro={() => setActiveTab("cerebro")} />
             </TabsContent>
 
             <TabsContent value="configuracoes" className="mt-0">

@@ -181,7 +181,7 @@ export async function testConnection() {
   }
 }
 
-export default {
+const postgresClient = {
   query,
   getAtendimentos,
   getAtendimentoById,
@@ -193,3 +193,5 @@ export default {
   buscarSemantica,
   testConnection
 };
+
+export default postgresClient;

@@ -91,7 +91,7 @@ async function testarServidorNext() {
           console.log(`      🌐 Interface: http://localhost:${port}`);
           return port;
         }
-      } catch (e) {
+      } catch {
         // Porta não responde, continuar
       }
     }

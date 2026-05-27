@@ -1,0 +1,14 @@
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://localhost:3001
+- Network:       http://26.246.29.108:3001
+- Environments: .env.local
+✓ Ready in 1039ms
+
+ POST /api/v1/keys 201 in 1368ms (next.js: 1270ms, application-code: 98ms)
+ POST /api/v1/keys 400 in 11ms (next.js: 4ms, application-code: 7ms)
+ POST /api/v1/keys 201 in 15ms (next.js: 3ms, application-code: 12ms)
+ GET /api/v1/keys?tenant_id=auge 200 in 12ms (next.js: 2ms, application-code: 10ms)
+ POST /api/v1/search 200 in 1062ms (next.js: 138ms, application-code: 924ms)
+ DELETE /api/v1/keys?id=1b33acd2-e9f1-49e7-a983-2f082c6c47ae 200 in 13ms (next.js: 3ms, application-code: 9ms)
+ DELETE /api/v1/keys?id=454d0b28-3b79-43cd-93fe-78ff4515d745 200 in 11ms (next.js: 4ms, application-code: 8ms)
+  Reload env: .env.local

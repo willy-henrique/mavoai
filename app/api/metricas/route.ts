@@ -52,12 +52,12 @@ export async function GET() {
             WHEN to_regclass('public.audit_events') IS NULL THEN NULL::int
             ELSE (
               SELECT COUNT(*)::int
-              FROM audit_events
+              FROM public.audit_events
               WHERE severity = 'error'
                 AND created_at >= NOW() - INTERVAL '24 hours'
             )
           END AS total`
-      ),
+      ).catch(() => ({ rows: [{ total: null }] })),
     ])
 
     const totalAtendimentos = Number(totais.rows[0]?.total_atendimentos || 0)

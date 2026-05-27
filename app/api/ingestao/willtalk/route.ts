@@ -22,6 +22,7 @@ import {
 import { after } from "next/server"
 import { NextResponse } from "next/server"
 import { logger } from "@/lib/logger"
+import { sanitizePII } from "@/lib/pii-sanitizer"
 import crypto from "crypto"
 
 interface PayloadWillTalk {
@@ -184,7 +185,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const textoOriginal = buildRichConversationText(body, ticketId, mensagens)
+    const textoOriginal = sanitizePII(buildRichConversationText(body, ticketId, mensagens))
     const payloadHash = crypto
       .createHash("sha256")
       .update(JSON.stringify({ ticketId, cliente, mensagens, dataEvento, sourceSystem, sourceEntityId }))

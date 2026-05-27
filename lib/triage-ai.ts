@@ -1,4 +1,6 @@
 import { gerarTextoIA } from "@/lib/ai-provider"
+import { selecionarConhecimento } from "@/lib/auge-knowledge"
+import type { OrgConfig } from "@/lib/org-loader"
 
 type TriageInput = {
   organization_id?: string
@@ -14,6 +16,8 @@ type TriageInput = {
   tentativas_triagem?: number
   idioma_preferencial?: string
   metadados_json?: unknown
+  tenantId?: string
+  orgConfig?: OrgConfig | null
 }
 
 type Fila = {
@@ -24,7 +28,26 @@ type Fila = {
   isActive?: boolean
 }
 
-const TRIAGE_SYSTEM_PROMPT = `Você é a IA de Triagem Técnica Sênior do WillTalk (WhatsApp), especialista em suporte do sistema AUGE ERP, fiscal, hardware e TI no Brasil.
+function buildTriageSystemPrompt(orgConfig?: OrgConfig | null): string {
+  const produto = orgConfig?.product_name || "AUGE ERP"
+  const isAuge = !orgConfig || orgConfig.id === "auge"
+
+  const augeBlock = isAuge
+    ? `
+REFERÊNCIAS TÉCNICAS PRIORITÁRIAS (${produto})
+- Módulos principais (código numérico): Vendas=30 (FVendas), Compras=25, Contagem=34, PainelEstoque=52, ContasAReceber=76, PerfilMovimento=207, Sintegra=231, ReformaCBS=586, ReformaIBS=587.
+- Fiscal: NF-e modelo 55 / NFC-e modelo 65 / SAT, SEFAZ, SPED, Sintegra, certificado digital, CFOP, CST/CSOSN, NCM, CEST, rejeição — nunca inventar códigos ou regras.
+- CONCEITO CENTRAL — Perfil de Movimento: define se a operação movimenta estoque, gera financeiro e gera fiscal. Antes de diagnosticar venda/compra, perguntar qual perfil foi usado.
+- NFe: chave = documento gerado; protocolo = autorizado pela SEFAZ; sem protocolo = pendente ou falha.
+- Tabelas importantes: PESSOAS (clientes TIPO='C', fornecedores TIPO='F'), LANCC (lançamentos financeiros), CABVEN/ITEVEN (cabeçalho/itens de movimentos), MODULOS/DIREITOS (menu e permissões).
+- Dados a coletar: filial, usuário/grupo, perfil de movimento, período, número do documento, cliente/fornecedor, produto, mensagem de erro exata.`
+    : `
+CONTEXTO DO SISTEMA
+- Sistema: ${produto}
+${orgConfig?.description ? `- Descrição: ${orgConfig.description}` : ""}
+- Dados a coletar: módulo/funcionalidade afetada, mensagem de erro exata, impacto (total/parcial), usuário/área afetada.`
+
+  return `Você é a IA de Triagem Técnica Sênior do WillTalk (WhatsApp), especialista em suporte do sistema ${produto}, hardware e TI no Brasil.
 
 MISSÃO
 Classificar o chamado com precisão cirúrgica, direcionar para a fila correta e extrair evidências técnicas suficientes para a próxima fase de resolução autônoma.
@@ -52,11 +75,7 @@ ESCALA DE SEVERIDADE
 - S2: alto — funcionalidade principal comprometida
 - S3: médio — impacto parcial com workaround
 - S4: baixo — informação ou melhoria
-
-REFERÊNCIAS TÉCNICAS PRIORITÁRIAS (AUGE/ERP/FISCAL)
-- Módulos comuns: cadastro de produtos, vendas/caixa, financeiro, relatórios, fiscal, TEF/PIX.
-- Fiscal: considerar termos e sintomas relacionados a NF-e/NFC-e/SAT, SEFAZ, SPED, XML, certificado digital, CFOP, CST/CSOSN, NCM, rejeição.
-- Nunca inventar códigos de rejeição, regras fiscais ou parâmetros do ERP.
+${augeBlock}
 
 CRITÉRIOS DE SUFICIÊNCIA PARA TRIAGEM COMPLETA
 Considere triagem_completed = true quando tiver TODOS:
@@ -84,9 +103,19 @@ SCHEMA DE SAÍDA (OBRIGATÓRIO)
   "resumo_triagem": "string curto e técnico",
   "campos_faltantes": []
 }`
+}
 
 function buildUserPrompt(input: TriageInput): string {
+  const textoContexto = `${input.mensagem_atual || ""} ${input.historico_conversa || ""}`
+  const isAuge = !input.tenantId || input.tenantId === "auge"
+  const conhecimentoRelevante = isAuge ? selecionarConhecimento(textoContexto, 2) : ""
+  const contextoBlock = conhecimentoRelevante
+    ? `=== CONTEXTO TÉCNICO ${input.orgConfig?.product_name || "AUGE"} (use para classificar com precisão) ===\n${conhecimentoRelevante}\n=== FIM DO CONTEXTO ===\n\n`
+    : ""
+
   return `Analise a entrada e retorne APENAS JSON válido no schema obrigatório.
+
+${contextoBlock}
 
 organization_id: ${input.organization_id || ""}
 ticket_id: ${input.ticket_id || ""}
@@ -198,7 +227,7 @@ export async function gerarTriagemIA(input: TriageInput) {
   const filas = Array.isArray(input.filas_disponiveis_json)
     ? (input.filas_disponiveis_json as Fila[])
     : []
-  const raw = await gerarTextoIA(TRIAGE_SYSTEM_PROMPT, buildUserPrompt(input))
+  const raw = await gerarTextoIA(buildTriageSystemPrompt(input.orgConfig), buildUserPrompt(input))
   const match = raw.match(/\{[\s\S]*\}/)
   if (!match) return safeFallback(input, filas)
   try {
