@@ -4,13 +4,17 @@ import useSWR from "swr"
 import {
   Activity,
   AlertTriangle,
+  Bot,
   BrainCircuit,
   CheckCircle2,
   Clock3,
   Cpu,
   Database,
+  Eye,
+  FileSearch,
   FileText,
   Gauge,
+  GitBranch,
   HardDrive,
   Layers3,
   LineChart as LineChartIcon,
@@ -18,6 +22,8 @@ import {
   Server,
   Sparkles,
   Users,
+  Wand2,
+  Zap,
 } from "lucide-react"
 import {
   Bar,
@@ -51,6 +57,85 @@ const COLORS = [
   "hsl(38 92% 50%)",
   "hsl(347 77% 55%)",
   "hsl(262 83% 58%)",
+]
+
+// ─── Roster de agentes do Cérebro ─────────────────────────────────────────────
+type AgentDep = "groq" | "embedding" | "postgres"
+
+interface AgentDef {
+  id: string
+  name: string
+  role: string
+  description: string
+  icon: typeof Bot
+  color: string
+  deps: AgentDep[]
+}
+
+const AGENT_ROSTER: AgentDef[] = [
+  {
+    id: "orchestrator",
+    name: "Orquestrador",
+    role: "Controle de fluxo",
+    description: "Rege todo o ciclo: menu → triagem → investigação → resolução autônoma → handoff humano.",
+    icon: GitBranch,
+    color: "emerald",
+    deps: [],
+  },
+  {
+    id: "triage",
+    name: "Triagem IA",
+    role: "Classificação técnica",
+    description: "Classifica chamados, define prioridade (S1–S4) e roteia para a fila correta via LLM.",
+    icon: Zap,
+    color: "blue",
+    deps: ["groq"],
+  },
+  {
+    id: "investigation",
+    name: "Avaliador",
+    role: "Qualidade de evidência",
+    description: "Avalia cada turno de investigação: adequado, insuficiente ou fora do tema.",
+    icon: FileSearch,
+    color: "violet",
+    deps: ["groq"],
+  },
+  {
+    id: "resolution",
+    name: "Motor de Resolução",
+    role: "Resolução autônoma",
+    description: "Tenta resolver em até 2 rodadas via RAG semântico + geração. Escala após esgotar.",
+    icon: Wand2,
+    color: "amber",
+    deps: ["groq", "embedding"],
+  },
+  {
+    id: "vision",
+    name: "Visão",
+    role: "Análise de imagem",
+    description: "Processa prints e fotos de equipamentos para extrair contexto técnico de suporte.",
+    icon: Eye,
+    color: "sky",
+    deps: ["groq"],
+  },
+  {
+    id: "curator",
+    name: "Curador",
+    role: "Gestão do conhecimento",
+    description: "Extrai problema / causa / solução de conversas encerradas e popula a base RAG.",
+    icon: Sparkles,
+    color: "rose",
+    deps: ["groq", "embedding"],
+  },
+  {
+    id: "handoff",
+    name: "Handoff",
+    role: "Resumo para humanos",
+    description: "Gera briefing estruturado ao escalar para técnico: contexto, tentativas e diagnóstico.",
+    icon: Bot,
+    color: "slate",
+    deps: ["groq"],
+  },
 ]
 
 interface IngestaoLog {
@@ -254,6 +339,9 @@ export function Dashboard() {
           progress={alertCount > 0 ? Math.min(alertCount * 25, 100) : 100}
         />
       </div>
+
+      {/* ── Agentes do Cérebro ─────────────────────────────────────────── */}
+      <AgentRoster health={health} />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(22rem,0.65fr)]">
         <Card className="rounded-lg border-slate-200 bg-white/95 shadow-sm">
@@ -758,4 +846,183 @@ function formatLatency(latency?: number) {
   if (typeof latency !== "number") return undefined
   if (latency <= 0) return "sem latência"
   return `${latency}ms`
+}
+
+// ─── Agent Roster ─────────────────────────────────────────────────────────────
+
+const AGENT_COLOR_MAP: Record<string, { icon: string; badge: string; ring: string; dot: string }> = {
+  emerald: {
+    icon: "bg-emerald-50 text-emerald-600 ring-emerald-200",
+    badge: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    ring: "ring-emerald-200",
+    dot: "bg-emerald-500",
+  },
+  blue: {
+    icon: "bg-blue-50 text-blue-600 ring-blue-200",
+    badge: "border-blue-200 bg-blue-50 text-blue-700",
+    ring: "ring-blue-200",
+    dot: "bg-blue-500",
+  },
+  violet: {
+    icon: "bg-violet-50 text-violet-600 ring-violet-200",
+    badge: "border-violet-200 bg-violet-50 text-violet-700",
+    ring: "ring-violet-200",
+    dot: "bg-violet-500",
+  },
+  amber: {
+    icon: "bg-amber-50 text-amber-600 ring-amber-200",
+    badge: "border-amber-200 bg-amber-50 text-amber-700",
+    ring: "ring-amber-200",
+    dot: "bg-amber-500",
+  },
+  sky: {
+    icon: "bg-sky-50 text-sky-600 ring-sky-200",
+    badge: "border-sky-200 bg-sky-50 text-sky-700",
+    ring: "ring-sky-200",
+    dot: "bg-sky-500",
+  },
+  rose: {
+    icon: "bg-rose-50 text-rose-600 ring-rose-200",
+    badge: "border-rose-200 bg-rose-50 text-rose-700",
+    ring: "ring-rose-200",
+    dot: "bg-rose-500",
+  },
+  slate: {
+    icon: "bg-slate-100 text-slate-600 ring-slate-200",
+    badge: "border-slate-200 bg-slate-100 text-slate-700",
+    ring: "ring-slate-200",
+    dot: "bg-slate-500",
+  },
+}
+
+function resolveAgentStatus(
+  agent: AgentDef,
+  health?: HealthStatus,
+): "online" | "degradado" | "offline" {
+  if (!health) return "online" // sem dados ainda → otimista
+  const groqOk = !!health.groq
+  const embeddingOk = !!health.embedding
+  const postgresOk = health.checks?.postgres?.ok ?? !!health.postgres
+
+  const depMap: Record<AgentDep, boolean> = {
+    groq: groqOk,
+    embedding: embeddingOk,
+    postgres: postgresOk,
+  }
+
+  if (agent.deps.length === 0) return "online"
+
+  const failed = agent.deps.filter((d) => !depMap[d])
+  if (failed.length === 0) return "online"
+  if (failed.length < agent.deps.length) return "degradado"
+  return "offline"
+}
+
+function AgentCard({
+  agent,
+  health,
+}: {
+  agent: AgentDef
+  health?: HealthStatus
+}) {
+  const status = resolveAgentStatus(agent, health)
+  const Icon = agent.icon
+  const colors = AGENT_COLOR_MAP[agent.color] ?? AGENT_COLOR_MAP.slate
+
+  return (
+    <div className="flex gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+      <span
+        className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg ring-1 ${colors.icon}`}
+      >
+        <Icon className="size-4" />
+      </span>
+
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold text-slate-900">{agent.name}</p>
+            <p className="truncate text-[11px] font-medium text-slate-500">{agent.role}</p>
+          </div>
+          <Badge
+            variant="outline"
+            className={`shrink-0 text-[11px] font-semibold ${
+              status === "online"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : status === "degradado"
+                  ? "border-amber-200 bg-amber-50 text-amber-700"
+                  : "border-rose-200 bg-rose-50 text-rose-700"
+            }`}
+          >
+            <span
+              className={`mr-1.5 inline-block size-1.5 rounded-full ${
+                status === "online"
+                  ? "bg-emerald-500"
+                  : status === "degradado"
+                    ? "bg-amber-500"
+                    : "bg-rose-500"
+              }`}
+            />
+            {status === "online" ? "Online" : status === "degradado" ? "Degradado" : "Offline"}
+          </Badge>
+        </div>
+        <p className="text-xs leading-relaxed text-slate-500">{agent.description}</p>
+        {agent.deps.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {agent.deps.map((dep) => (
+              <span
+                key={dep}
+                className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+              >
+                {dep}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AgentRoster({ health }: { health?: HealthStatus }) {
+  const activeCount = AGENT_ROSTER.filter(
+    (a) => resolveAgentStatus(a, health) === "online",
+  ).length
+  const degradedCount = AGENT_ROSTER.filter(
+    (a) => resolveAgentStatus(a, health) === "degradado",
+  ).length
+
+  return (
+    <Card className="rounded-lg border-slate-200 bg-white/95 shadow-sm">
+      <CardHeader className="flex-row items-start justify-between gap-3 pb-3">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <BrainCircuit className="size-4 text-emerald-600" />
+            Agentes do Cérebro
+          </CardTitle>
+          <CardDescription>
+            Pipeline multiagente: orquestrador + triagem + investigação + resolução autônoma + curadoria.
+          </CardDescription>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="inline-flex h-9 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700">
+            <span className="size-2 rounded-full bg-emerald-500" />
+            {activeCount} online
+          </span>
+          {degradedCount > 0 && (
+            <span className="inline-flex h-9 items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-700">
+              <span className="size-2 rounded-full bg-amber-500" />
+              {degradedCount} degradado{degradedCount > 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          {AGENT_ROSTER.map((agent) => (
+            <AgentCard key={agent.id} agent={agent} health={health} />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
 }
