@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mavoai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mavoai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "1"
+    ports:
+      - "5434:5432"
+    volumes:
+      - mavoai_postgres_data:/var/lib/postgresql/data
+      # SETUP COMPLETO: roda automaticamente ao criar o container pela primeira vez.
+      # Se o banco já existir, estes scripts NÃO são re-executados (comportamento Docker padrão).
+      # Para forçar re-execução: docker compose down -v && docker compose up -d
+      - ./scripts/000_SETUP_COMPLETO.sql:/docker-entrypoint-initdb.d/000_SETUP_COMPLETO.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mavoai"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+
+volumes:
+  mavoai_postgres_data:

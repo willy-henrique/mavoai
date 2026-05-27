@@ -209,12 +209,12 @@ export async function GET() {
   })
 
   try {
-    const { data: categorias, error: catError } = await supabase
+    const { error: catError } = await supabase
       .from("categorias")
       .select("*")
       .limit(1)
 
-    const { data: atendimentos, error: atendError } = await supabase
+    const { error: atendError } = await supabase
       .from("atendimentos")
       .select("*")
       .limit(1)
@@ -229,7 +229,7 @@ export async function GET() {
         error: atendError?.message,
       },
     })
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: "Erro ao verificar tabelas" },
       { status: 500 }

@@ -1,6 +1,16 @@
 import { gerarTextoIA } from "@/lib/ai-provider"
 import { logger } from "@/lib/logger"
 
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/^#+\s+/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\*(.*?)\*/g, "$1")
+    .replace(/^[-*•]\s+/gm, "")
+    .replace(/\n{2,}/g, " | ")
+    .trim()
+}
+
 export type HandoffSummaryKind =
   | "investigation_success"
   | "investigation_client_unclear"
@@ -38,27 +48,27 @@ Regras:
 - Não julgue o cliente
 - Não invente fatos que não estejam no contexto
 - Formato: 4 a 8 linhas curtas, cada uma com prefixo "• "
-- Máximo 1100 caracteres
-- Sem markdown pesado, sem emoji
+- Máximo 900 caracteres
+- PROIBIDO: markdown, headers, títulos, emojis, listas com traço ou asterisco
+- Use apenas texto simples com prefixo "• " por linha
 
 Inclua quando disponível:
 • Tipo de handoff e motivo
 • Fila/demanda
-• Resumo do problema relatado (texto e/ou imagem)
-• Se houve fase de resolução autônoma: quantas tentativas e o que foi tentado
-• Avaliação da evidência pela IA
-• 1 sugestão de primeiro passo para o humano`
+• Resumo breve do problema (1-2 linhas, sem repetir toda a solução já tentada)
+• Se houve resolução autônoma: número de tentativas e resultado sucinto
+• 1 sugestão de próximo passo para o humano`
 
 function buildResolutionSection(ctx: HandoffSummaryContext): string {
   if (!ctx.resolutionAttempts) return ""
   const lines: string[] = []
-  lines.push(`• Tentativas de resolução autônoma: ${ctx.resolutionAttempts} de 3`)
+  lines.push(`• Tentativas de resolução autônoma: ${ctx.resolutionAttempts}`)
   if (ctx.resolutionProblemText?.trim()) {
-    lines.push(`• Contexto técnico coletado: ${ctx.resolutionProblemText.trim().slice(0, 280)}`)
+    lines.push(`• Contexto técnico coletado: ${ctx.resolutionProblemText.trim().slice(0, 200)}`)
   }
   if (ctx.resolutionPrevSolutions?.length) {
     ctx.resolutionPrevSolutions.forEach((s, i) => {
-      lines.push(`• Solução tentativa ${i + 1}: ${s.slice(0, 220)}`)
+      lines.push(`• Solução tentativa ${i + 1}: ${stripMarkdown(s).slice(0, 160)}`)
     })
   }
   return lines.join("\n")
@@ -106,11 +116,17 @@ export async function buildAgentHandoffSummary(
   ctx: HandoffSummaryContext,
 ): Promise<string> {
   try {
+    const sanitizedCtx = {
+      ...ctx,
+      resolutionPrevSolutions: ctx.resolutionPrevSolutions?.map((s) =>
+        stripMarkdown(s).slice(0, 180),
+      ),
+    }
     const raw = await gerarTextoIA(
       SYSTEM,
-      `Contexto (JSON):\n${JSON.stringify(ctx, null, 2)}`,
+      `Contexto (JSON):\n${JSON.stringify(sanitizedCtx, null, 2)}`,
     )
-    const t = raw.trim().slice(0, 1100)
+    const t = raw.trim().slice(0, 900)
     if (t.length >= 80) return t
   } catch (e) {
     logger.warn("agent_handoff_summary_ia_failed", {

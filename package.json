@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:pilot": "next dev -p 3100",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
@@ -11,6 +12,10 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "db:up": "sg docker -c 'docker compose up -d postgres' 2>/dev/null || docker compose up -d postgres",
+    "db:down": "sg docker -c 'docker compose down' 2>/dev/null || docker compose down",
+    "db:logs": "sg docker -c 'docker compose logs -f postgres' 2>/dev/null || docker compose logs -f postgres",
+    "db:test": "node test-postgres-connection.js",
     "verify:stack": "node scripts/verify-stack.mjs",
     "example:groq-sdk": "python scripts/groq_sdk_example.py"
   },
@@ -60,8 +65,9 @@
     "embla-carousel-react": "8.6.0",
     "input-otp": "1.4.2",
     "lucide-react": "^0.564.0",
-    "next": "16.2.0",
+    "next": "^16.2.6",
     "next-themes": "^0.4.6",
+    "pdf-parse": "^1.1.1",
     "pg": "^8.20.0",
     "react": "19.2.4",
     "react-day-picker": "9.13.2",
@@ -84,11 +90,17 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.6",
     "jsdom": "^27.0.1",
-    "postcss": "^8.5",
+    "postcss": "8.5.14",
+    "puppeteer": "^24.43.1",
     "tailwindcss": "^4.2.0",
     "tw-animate-css": "1.3.3",
     "typescript": "5.7.3",
     "vitest": "^4.1.2"
+  },
+  "overrides": {
+    "postcss": "8.5.14"
   }
 }

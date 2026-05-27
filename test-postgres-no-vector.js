@@ -90,7 +90,7 @@ async function testConnection() {
       try {
         const countResult = await client.query(`SELECT COUNT(*) as count FROM ${table}`);
         console.log(`  📈 ${table}: ${countResult.rows[0].count} registros`);
-      } catch (e) {
+      } catch {
         // Tabela não existe
       }
     }

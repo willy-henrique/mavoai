@@ -53,14 +53,15 @@ function calcularScoreLexical(textoBase: string, termos: string[]) {
 
 export async function buscarSemantica(
   texto: string,
-  limite = 3
+  limite = 3,
+  tenantId?: string
 ): Promise<ResultadoSemantico[]> {
   try {
     const embedding = await gerarEmbedding(texto)
     const vector = embeddingParaVector(embedding)
     const result = await query(
-      "SELECT * FROM buscar_atendimentos_semanticos($1::text, $2::int)",
-      [vector, limite]
+      "SELECT * FROM buscar_atendimentos_semanticos($1::vector, $2::int, $3::text)",
+      [vector, limite, tenantId ?? null]
     )
 
     if (Array.isArray(result.rows)) {
@@ -88,8 +89,8 @@ export async function buscarSemantica(
   if (filtro || termos.length > 0) {
     const result = await query(
       `SELECT id, resumo, resumo_problema, problema, causa, solucao, texto_original
-       FROM buscar_atendimentos_simples($1, $2)`,
-      [termos.join(" "), limite]
+       FROM buscar_atendimentos_simples($1, $2, $3::text)`,
+      [termos.join(" "), limite, tenantId ?? null]
     )
     fallbackData = result.rows || []
   }
@@ -99,9 +100,10 @@ export async function buscarSemantica(
     const raw = await query(
       `SELECT id, resumo, resumo_problema, problema, causa, solucao, texto_original
        FROM atendimentos
+       WHERE ($1::text IS NULL OR tenant_id = $1::text)
        ORDER BY updated_at DESC
-       LIMIT $1`,
-      [limite]
+       LIMIT $2`,
+      [tenantId ?? null, limite]
     )
     fallbackData = raw.rows || []
   }

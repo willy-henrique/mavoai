@@ -2,7 +2,6 @@ import type {
   CerebroClientConfig,
   EventoIngestao,
   ResultadoIngestao,
-  ResultadoBusca,
   RespostaBusca,
   ResultadoQuery,
   Audiencia,

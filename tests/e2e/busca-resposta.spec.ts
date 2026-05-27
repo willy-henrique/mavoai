@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test"
 const BASE = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"
 const TOKEN = process.env.CEREBRO_INGEST_TOKEN || ""
 
-function authHeaders() {
+function authHeaders(): Record<string, string> {
   return TOKEN
     ? { "Content-Type": "application/json", Authorization: `Bearer ${TOKEN}` }
     : { "Content-Type": "application/json" }

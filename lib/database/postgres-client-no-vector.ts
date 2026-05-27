@@ -173,7 +173,7 @@ export async function buscarFullText(queryText: string, limit = 3) {
       [queryText, limit]
     );
     return result.rows;
-  } catch (error) {
+  } catch {
     // Fallback para busca simples se full-text não funcionar
     return buscarTextual(queryText, limit);
   }
@@ -287,7 +287,7 @@ export async function checkDatabaseStructure() {
   }
 }
 
-export default {
+const postgresClientNoVector = {
   query,
   getAtendimentos,
   getAtendimentoById,
@@ -303,3 +303,5 @@ export default {
   testConnection,
   checkDatabaseStructure
 };
+
+export default postgresClientNoVector;

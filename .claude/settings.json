@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test *)",
+      "Bash(npm run *)",
+      "Bash(python3 -c ' *)",
+      "Read(//mnt/c/willydev/willtalk/**)",
+      "Bash(npx prisma *)",
+      "Bash(curl -s --max-time 5 http://localhost:5678/api/v1/workflows)",
+      "Bash(# Tenta pegar API key do n8n pelo arquivo de config local *)",
+      "Read(//mnt/c/Users/**)",
+      "Read(//root/**)",
+      "Read(//home/willy/.n8n/**)"
+    ],
+    "additionalDirectories": [
+      "/mnt/c/willydev/willtalk"
+    ]
+  }
+}

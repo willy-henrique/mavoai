@@ -11,11 +11,12 @@ import {
   buildResolutionUnclearReply,
   MAX_AI_RESOLUTION_ATTEMPTS,
 } from "@/lib/resolution-engine"
+import { listActiveOrgs, loadOrgConfig, type OrgConfig } from "@/lib/org-loader"
 
 // ─── Constantes de controle ────────────────────────────────────────────────────
 
 /** Rodadas de evidência adequada necessárias antes de tentar resolver. */
-export const INVESTIGATION_REQUIRED_ADEQUATE_ROUNDS = 2
+export const INVESTIGATION_REQUIRED_ADEQUATE_ROUNDS = 1
 
 /** Sequência de respostas inadequadas/fora do tema que dispara handoff direto. */
 export const INVESTIGATION_MAX_INADEQUATE_BEFORE_HANDOFF = 2
@@ -57,6 +58,16 @@ export type OrchestratorConversationState = {
   resolution_problem_text?: string
   /** JSON serializado: string[] com as soluções já enviadas (para evitar repetição). */
   resolution_prev_solutions?: string
+  /** Última resposta enviada pela IA — usado para evitar repetição de perguntas. */
+  last_ai_reply?: string
+
+  // ── Fase de seleção de empresa ──────────────────────────────────────────
+  /** 'pending' = aguardando escolha; 'selected' = empresa escolhida. */
+  company_selection_phase?: "pending" | "selected"
+  /** tenant_id resolvido durante a seleção de empresa. */
+  selected_tenant_id?: string | null
+  /** Tentativas inválidas de seleção de empresa. */
+  company_selection_invalid_attempts?: number
 }
 
 export type PlatformOrchestratorInput = {
@@ -71,6 +82,8 @@ export type PlatformOrchestratorInput = {
   business_hours_open: boolean
   conversation: OrchestratorConversationState
   queues: OrchestratorQueue[]
+  /** Org config pré-carregada. null = org desconhecida, dispara seleção de empresa. */
+  orgConfig?: OrgConfig | null
 }
 
 export type PlatformOrchestratorOutput = {
@@ -94,6 +107,12 @@ export type PlatformOrchestratorOutput = {
   resolution_attempts?: number
   resolution_problem_text?: string
   resolution_prev_solutions?: string
+  last_ai_reply?: string
+
+  // Fase de seleção de empresa
+  company_selection_phase?: "pending" | "selected"
+  selected_tenant_id?: string | null
+  company_selection_invalid_attempts?: number
 }
 
 type InvestigationEvalResult = {
@@ -102,10 +121,74 @@ type InvestigationEvalResult = {
   textoResposta: string
 }
 
-const WHATSAPP_REPLY_MAX_CHARS = 320
+const WHATSAPP_REPLY_MAX_CHARS = 4096
 const BRAND_HEADER = "*Mavo AI*"
 
 // ─── Utilitários ───────────────────────────────────────────────────────────────
+
+/** Minimum chars in a free-text message to skip investigation and resolve directly. */
+const FAST_PATH_MIN_CHARS = 35
+
+/**
+ * Returns true if the message contains technical support indicators.
+ * Keeps non-technical messages (greetings, tests) from triggering investigation.
+ */
+function isTechnicalQuery(text: string): boolean {
+  const t = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+  const signals = [
+    "erro", "error", "problema", "falha", "nao funciona", "não funciona",
+    "imprimindo", "imprime", "auge", "erp", "nota", "nfe", "nfce", "fiscal",
+    "sistema", "tela", "modulo", "rotina", "banco", "caixa", "venda",
+    "impressora", "balanca", "leitor", "scanner", "tef", "pix", "boleto",
+    "certificado", "sefaz", "xml", "produto", "estoque", "travou", "lento",
+    "conexao", "driver", "instalar", "atualizar", "configurar", "acesso",
+    "nao abre", "nao carrega", "nao entra", "nao gera", "nao emite",
+    "nao imprime", "nao comunica", "sem comunicacao", "sem resposta",
+    "parou", "caiu", "desconectou", "timeout", "senha", "login",
+    "devolucao", "devolução", "troca", "gerar", "emitir", "cadastrar",
+    "como faco", "como faço", "passo a passo", "tutorial", "procedimento",
+    "sped", "speed", "efd", "ecf", "apuracao", "apuração", "livro fiscal",
+    "registro de entradas", "registro de saidas", "registro de saídas",
+  ]
+  return signals.some((s) => t.includes(s))
+}
+
+/** Detecta quando o cliente pede explicitamente um passo a passo ou procedimento. */
+function isDirectProcedureRequest(text: string): boolean {
+  const t = text.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "")
+  return [
+    "passo a passo", "passo-a-passo",
+    "como gerar", "como emitir", "como fazer", "como faco", "como eu faco", "como eu fazer",
+    "como configurar", "como funciona", "como se faz", "como e feito", "como e para fazer",
+    "me explica", "me ensina", "me mostra", "me fala como", "me diz como",
+    "me passa o passo", "me passa o procedimento",
+    "instrucao", "instrucoes", "tutorial", "procedimento",
+    "qual o processo", "qual e o processo", "qual o caminho",
+    "quero gerar", "quero emitir", "quero fazer", "quero saber como",
+    "preciso gerar", "preciso emitir", "preciso fazer",
+  ].some((p) => t.includes(p))
+}
+
+/**
+ * Extracts the primary identifying terms from a queue name.
+ * Used to penalise queues whose key term doesn't appear in the user message.
+ */
+function extractPrimaryQueueTerms(queueName: string): string[] {
+  const stopWords = new Set([
+    "de", "da", "do", "dos", "das", "e", "ou", "em", "no", "na",
+    "suporte", "atendimento", "fila", "geral", "mgv", "mavo",
+    "gestao", "gestão", "erp", "auge", "ti",
+  ])
+  return queueName
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 4 && !stopWords.has(w))
+}
 
 function normalizeText(value: unknown): string {
   return String(value || "").trim()
@@ -137,26 +220,6 @@ function getGreetingByBrasiliaTime(date = new Date()): string {
   if (hour < 12) return "Bom dia"
   if (hour < 18) return "Boa tarde"
   return "Boa noite"
-}
-
-function buildDemandMenu(
-  options: Array<{ menu_option: number; name: string }>,
-  clienteNome?: string | null,
-): string {
-  const lines = options
-    .sort((a, b) => a.menu_option - b.menu_option)
-    .map((o) => `*${o.menu_option}* - ${o.name}`)
-    .join("\n")
-  const greeting = getGreetingByBrasiliaTime()
-  const nome = normalizeText(clienteNome)
-  const saudacao = nome ? `${greeting}, ${nome}!` : `${greeting}!`
-  return (
-    `${saudacao}\n` +
-    "Atendimento Mavo AI.\n\n" +
-    "Escolha uma opção pelo número:\n" +
-    lines +
-    "\n\nOu descreva seu problema em 1 frase e eu classifico automaticamente."
-  )
 }
 
 function inferQueueIntent(queueName: string): "fiscal" | "banco" | "equipamento" | "sistema" {
@@ -264,7 +327,15 @@ function scoreQueueByFreeText(queue: OrchestratorQueue, inputText: string): numb
     if (text.includes(word)) score += 1
   }
 
-  return score
+  // Penalise when the queue's primary identifying term is absent from the user text.
+  // Prevents "Balança" queue from capturing "impressora" queries via shared intent keywords.
+  const primaryTerms = extractPrimaryQueueTerms(queue.name)
+  if (primaryTerms.length > 0) {
+    const hasPrimaryTerm = primaryTerms.some((term) => text.includes(term))
+    if (!hasPrimaryTerm) score -= 3
+  }
+
+  return Math.max(0, score)
 }
 
 function inferQueueFromFreeText(
@@ -304,9 +375,7 @@ async function inferQueueFromAI(
   const options = queues.map((q) => ({ id: String(q.id), name: q.name }))
   const systemPrompt =
     "Você é classificador de fila de suporte técnico. " +
-    "Contexto principal: atendimento de clientes do sistema AUGE ERP no Brasil. " +
-    "Priorize sinais de módulos/rotinas do AUGE (cadastro, fiscal, vendas, financeiro, relatório, certificado, impressão fiscal, TEF/PIX). " +
-    "Para fiscal, considere termos como NF-e, NFC-e, SAT, CFOP, CST, CSOSN, ICMS, PIS/COFINS, SEFAZ, SPED, XML e certificado digital. " +
+    "Contexto principal: atendimento de clientes no Brasil. " +
     "Escolha apenas 1 fila com base no texto do cliente. " +
     "Responda somente JSON válido: {\"queue_id\":\"...|null\",\"confidence\":0.0}. " +
     "Se estiver ambíguo, retorne queue_id null. Não invente IDs."
@@ -393,12 +462,23 @@ function buildTriageNoQueues(): string {
   )
 }
 
-function buildTriageHumanHandoff(): string {
-  return (
-    "Não conseguimos identificar sua solicitação com segurança.\n\n" +
-    "Você será encaminhado(a) para um atendente humano, que continuará o atendimento por aqui.\n" +
-    "Aguarde, por favor."
-  )
+/** Detecta quando o cliente está frustrado com a resposta da IA ou pedindo mais informação. */
+function isClientFrustrated(inputText: string): boolean {
+  const t = normalizeTextLower(inputText).normalize("NFD").replace(/\p{Diacritic}/gu, "")
+  const signals = [
+    "pouca informacao", "informacao incompleta", "incompleto", "ta incompleto",
+    "cortou", "cortou a mensagem", "nao entendi", "nao ficou claro", "mal explicado",
+    "nao deu para entender", "resposta curta", "pouca coisa", "so isso",
+    "isso nao ajuda", "nao ajudou", "nao era isso", "nao e isso",
+    "ta errado", "errou", "errada", "errado", "nao serve",
+    "nao adiantou", "sem sentido", "nao faz sentido",
+    "isso nao resolve", "nao resolveu nada",
+    "ta dando pouca", "dando pouca", "muito pouco", "pouco demais",
+    "nao ta certo", "que resposta e essa", "que resposta essa",
+    "nao gostei", "pessimo", "horrivel", "otimo nao", "que isso",
+    "que isso mano", "que isso cara",
+  ]
+  return signals.some((s) => t.includes(s))
 }
 
 function isClientReportingDifficulty(inputText: string): boolean {
@@ -457,30 +537,10 @@ function buildFollowUpAfterAdequate(params: {
   queueName: string
   adequateRounds: number
 }): string {
-  const { body, queueName, adequateRounds } = params
+  const { body } = params
   const quick = buildQuickGuidance(body)
-  if (quick) {
-    if (adequateRounds + 1 >= INVESTIGATION_REQUIRED_ADEQUATE_ROUNDS) {
-      return (
-        `Entendi o cenário de *${queueName}*.\n\n${quick}\n\n` +
-        "_Se o comportamento continuar, analisarei as soluções disponíveis para você._"
-      )
-    }
-    return (
-      `Entendi o cenário de *${queueName}*.\n\n${quick}\n\n` +
-      "_Se puder, envie também a mensagem exata exibida ou um print da tela para complementar a análise._"
-    )
-  }
-  if (adequateRounds + 1 >= INVESTIGATION_REQUIRED_ADEQUATE_ROUNDS) {
-    return (
-      `Entendi o contexto inicial da sua demanda de *${queueName}*.\n\n` +
-      "As informações já ajudam. Se houver mais algum detalhe relevante — mensagem exata, nome da rotina/tela — pode enviar por aqui."
-    )
-  }
-  return (
-    `Entendi o contexto inicial da sua demanda de *${queueName}*.\n\n` +
-    "Para complementar a análise, envie a mensagem exata exibida na tela, o nome da rotina/módulo ou um print completo, se estiver disponível."
-  )
+  if (quick) return quick
+  return "Entendido. Qual mensagem de erro aparece na tela?"
 }
 
 function getConversationCounters(conversation: OrchestratorConversationState) {
@@ -533,6 +593,15 @@ function getConversationCounters(conversation: OrchestratorConversationState) {
       return []
     }
   })()
+  const lastAiReply = normalizeText(conversation.last_ai_reply)
+
+  const companySelectionPhase = conversation.company_selection_phase ?? null
+  const selectedTenantId = conversation.selected_tenant_id ?? null
+  const companySelectionInvalidAttempts =
+    typeof conversation.company_selection_invalid_attempts === "number" &&
+    Number.isFinite(conversation.company_selection_invalid_attempts)
+      ? conversation.company_selection_invalid_attempts
+      : 0
 
   return {
     menuInvalidAttempts,
@@ -543,6 +612,10 @@ function getConversationCounters(conversation: OrchestratorConversationState) {
     resolutionAttempts,
     resolutionProblemText,
     resolutionPrevSolutions,
+    lastAiReply,
+    companySelectionPhase,
+    selectedTenantId,
+    companySelectionInvalidAttempts,
   }
 }
 
@@ -559,6 +632,9 @@ function buildOutput(params: {
   resolution_attempts?: number
   resolution_problem_text?: string
   resolution_prev_solutions?: string
+  company_selection_phase?: "pending" | "selected"
+  selected_tenant_id?: string | null
+  company_selection_invalid_attempts?: number
 }): PlatformOrchestratorOutput {
   const humanizedReply = humanizeOutboundReply(params.reply_text)
   const cleanReplyText = sanitizeOutboundReply(withBrandHeader(humanizedReply))
@@ -576,6 +652,10 @@ function buildOutput(params: {
     resolution_attempts: params.resolution_attempts ?? 0,
     resolution_problem_text: params.resolution_problem_text ?? "",
     resolution_prev_solutions: params.resolution_prev_solutions ?? "[]",
+    last_ai_reply: cleanReplyText,
+    company_selection_phase: params.company_selection_phase,
+    selected_tenant_id: params.selected_tenant_id ?? null,
+    company_selection_invalid_attempts: params.company_selection_invalid_attempts ?? 0,
   }
 }
 
@@ -610,26 +690,17 @@ function sanitizeOutboundReply(raw: string): string {
     .replace(/\r/g, "")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
-    .replace(/\s{2,}/g, " ")
     .trim()
 
   if (text.length <= WHATSAPP_REPLY_MAX_CHARS) return text
 
+  // Acima do limite: corta em parágrafo completo para não truncar passos no meio
   const hardLimit = text.slice(0, WHATSAPP_REPLY_MAX_CHARS)
-  const lastPunctuation = Math.max(
-    hardLimit.lastIndexOf("."),
-    hardLimit.lastIndexOf("!"),
-    hardLimit.lastIndexOf("?"),
-    hardLimit.lastIndexOf(":"),
-  )
-  if (lastPunctuation >= 120) {
-    return hardLimit.slice(0, lastPunctuation + 1).trim()
-  }
-  const lastSpace = hardLimit.lastIndexOf(" ")
-  if (lastSpace >= 120) {
-    return `${hardLimit.slice(0, lastSpace).trim()}...`
-  }
-  return `${hardLimit.trim()}...`
+  const lastNewline = hardLimit.lastIndexOf("\n\n")
+  if (lastNewline >= 200) return hardLimit.slice(0, lastNewline).trim()
+  const lastPunct = Math.max(hardLimit.lastIndexOf("."), hardLimit.lastIndexOf("!"), hardLimit.lastIndexOf("?"))
+  if (lastPunct >= 200) return hardLimit.slice(0, lastPunct + 1).trim()
+  return hardLimit.trim()
 }
 
 /** Acumula texto do problema para uso na fase de resolução. */
@@ -637,6 +708,57 @@ function accumulateProblemText(existing: string, newText: string): string {
   if (!newText.trim()) return existing
   if (!existing.trim()) return newText.trim()
   return `${existing} | ${newText.trim()}`
+}
+
+// ─── Fast-path helper ─────────────────────────────────────────────────────────
+
+/**
+ * When a queue is auto-classified from a message that already describes the
+ * problem clearly (long enough + technical content), skip the investigation
+ * prompt and go directly to resolution attempt 1.
+ *
+ * Returns the output to send, or null to fall back to buildInvestigationPrompt.
+ */
+async function tryFastPath(params: {
+  body: string
+  queue: OrchestratorQueue
+  baseReason: string
+  suffix: string
+  menuInvalidAttempts: number
+  tenantId?: string
+  orgConfig?: OrgConfig | null
+}): Promise<PlatformOrchestratorOutput | null> {
+  const { body, queue, baseReason, suffix, menuInvalidAttempts, tenantId, orgConfig } = params
+  const isProcedure = isDirectProcedureRequest(body)
+  if (!isProcedure && (body.length < FAST_PATH_MIN_CHARS || !isTechnicalQuery(body))) return null
+
+  let primeiraSolucao: string
+  try {
+    primeiraSolucao = await gerarSolucaoAutonoma({
+      problemText: body,
+      queueName: queue.name,
+      attemptNumber: 1,
+      previousSolutions: [],
+      tenantId,
+      orgConfig,
+    })
+  } catch {
+    return null // IA indisponível — cai para investigação normal
+  }
+
+  return buildOutput({
+    reply_text: primeiraSolucao + suffix,
+    triage_completed: false,
+    queue_id: String(queue.id),
+    reason: `${baseReason}_fast_resolution`,
+    menu_invalid_attempts: menuInvalidAttempts,
+    investigation_adequate_rounds: 1,
+    investigation_inadequate_streak: 0,
+    resolution_active: true,
+    resolution_attempts: 1,
+    resolution_problem_text: body,
+    resolution_prev_solutions: JSON.stringify([primeiraSolucao.slice(0, 300)]),
+  })
 }
 
 // ─── Orquestrador principal ────────────────────────────────────────────────────
@@ -665,18 +787,162 @@ export async function runPlatformOrchestrator(
     resolutionAttempts,
     resolutionProblemText,
     resolutionPrevSolutions,
+    lastAiReply,
+    companySelectionPhase,
+    selectedTenantId,
+    companySelectionInvalidAttempts,
   } = getConversationCounters(input.conversation)
 
-  // ── Pós-triagem: ACK simples ──────────────────────────────────────────────
+  // ── Resolve tenantId e orgConfig efetivos ────────────────────────────────
+  let resolvedOrgConfig: OrgConfig | null = input.orgConfig ?? null
+  let resolvedTenantId: string =
+    selectedTenantId ?? resolvedOrgConfig?.id ?? input.organization_id ?? "auge"
+
+  // ── Fase de seleção de empresa ────────────────────────────────────────────
+  // Dispara quando não há orgConfig conhecida E a empresa ainda não foi selecionada
+  if (!resolvedOrgConfig && !selectedTenantId) {
+    const orgs = await listActiveOrgs()
+
+    if (orgs.length === 0) {
+      return buildOutput({
+        reply_text: "Nenhuma empresa configurada no sistema. Contate o administrador.",
+        triage_completed: true,
+        queue_id: null,
+        reason: "no_orgs_configured",
+        menu_invalid_attempts: menuInvalidAttempts,
+        investigation_adequate_rounds: investigationAdequateRounds,
+        investigation_inadequate_streak: 0,
+      })
+    }
+
+    if (orgs.length === 1) {
+      // Auto-seleciona sem perguntar
+      resolvedOrgConfig = orgs[0]
+      resolvedTenantId = orgs[0].id
+      // Continua o fluxo normal com a org auto-selecionada
+    } else if (companySelectionPhase === "pending") {
+      // Tenta fazer o match da resposta do usuário com uma empresa
+      const bodyNorm = body.trim()
+      const num = Number.parseInt(bodyNorm, 10)
+      const matchedByNumber = Number.isInteger(num) && num >= 1 && num <= orgs.length
+        ? orgs[num - 1]
+        : null
+      const matchedByName = !matchedByNumber
+        ? orgs.find((o) =>
+            bodyNorm.toLowerCase().includes(o.display_name.toLowerCase()) ||
+            bodyNorm.toLowerCase().includes(o.id.toLowerCase()),
+          )
+        : null
+      const matched = matchedByNumber ?? matchedByName
+
+      if (matched) {
+        resolvedOrgConfig = matched
+        resolvedTenantId = matched.id
+        // Carrega do banco para garantir frescor (e popular o cache)
+        const freshConfig = await loadOrgConfig(matched.id)
+        if (freshConfig) resolvedOrgConfig = freshConfig
+        // Continua o fluxo normal com a empresa selecionada
+      } else {
+        // Seleção inválida
+        const nextInvalidAttempts = companySelectionInvalidAttempts + 1
+        if (nextInvalidAttempts >= 3) {
+          return buildOutput({
+            reply_text: "Não consegui identificar sua empresa. Um atendente continuará por aqui.",
+            triage_completed: true,
+            queue_id: null,
+            reason: "company_selection_failed",
+            menu_invalid_attempts: menuInvalidAttempts,
+            investigation_adequate_rounds: 0,
+            investigation_inadequate_streak: 0,
+            company_selection_phase: "pending",
+            company_selection_invalid_attempts: nextInvalidAttempts,
+          })
+        }
+        const lista = orgs.map((o, i) => `${i + 1}. ${o.display_name}`).join("\n")
+        return buildOutput({
+          reply_text: `Não entendi. Digite o número da sua empresa:\n\n${lista}`,
+          triage_completed: false,
+          queue_id: null,
+          reason: "company_selection_invalid_attempt",
+          menu_invalid_attempts: menuInvalidAttempts,
+          investigation_adequate_rounds: 0,
+          investigation_inadequate_streak: 0,
+          company_selection_phase: "pending",
+          company_selection_invalid_attempts: nextInvalidAttempts,
+        })
+      }
+    } else {
+      // Primeira mensagem sem empresa definida — apresenta lista
+      const greeting = getGreetingByBrasiliaTime()
+      const nome = normalizeText(input.cliente.nome)
+      const saudacao = nome ? `${greeting}, ${nome}!` : `${greeting}!`
+      const lista = orgs.map((o, i) => `${i + 1}. ${o.display_name}`).join("\n")
+      return buildOutput({
+        reply_text: `${saudacao}\n\nPara te ajudar melhor, informe o número da sua empresa:\n\n${lista}\n\nDigite apenas o número.`,
+        triage_completed: false,
+        queue_id: null,
+        reason: "company_selection_presented",
+        menu_invalid_attempts: menuInvalidAttempts,
+        investigation_adequate_rounds: 0,
+        investigation_inadequate_streak: 0,
+        company_selection_phase: "pending",
+        company_selection_invalid_attempts: 0,
+      })
+    }
+  }
+
+  const persistedOrgState = {
+    company_selection_phase: (resolvedOrgConfig ? "selected" : undefined) as "selected" | undefined,
+    // Sempre persiste o tenant resolvido — inclusive "auge" — para não repetir a seleção.
+    selected_tenant_id: resolvedOrgConfig ? resolvedTenantId : null,
+    company_selection_invalid_attempts: companySelectionInvalidAttempts,
+  }
+
+  // ── Pós-triagem ───────────────────────────────────────────────────────────
   if (triageCompleted) {
+    // Se o cliente faz uma nova pergunta técnica ou pede passo a passo após o handoff,
+    // responde diretamente em vez de repetir o ACK de atendente.
+    if (queueId && (isDirectProcedureRequest(body) || (isTechnicalQuery(body) && body.length >= FAST_PATH_MIN_CHARS))) {
+      const currentQueue = qlist.find((q) => String(q.id) === queueId)
+      if (currentQueue) {
+        try {
+          const resposta = await gerarSolucaoAutonoma({
+            problemText: body,
+            queueName: currentQueue.name,
+            attemptNumber: 1,
+            previousSolutions: [],
+            tenantId: resolvedTenantId,
+            orgConfig: resolvedOrgConfig,
+          })
+          return buildOutput({
+            reply_text: resposta + suffix,
+            triage_completed: true,
+            queue_id: queueId,
+            reason: "post_triage_followup_answered",
+            menu_invalid_attempts: menuInvalidAttempts,
+            investigation_adequate_rounds: investigationAdequateRounds,
+            investigation_inadequate_streak: 0,
+            ...persistedOrgState,
+          })
+        } catch {
+          // IA indisponível — cai para ACK
+        }
+      }
+    }
+
+    // ACK de handoff — evita repetir se já foi enviado antes
+    const ackAlreadySent = lastAiReply.length > 10 && lastAiReply.includes("atendente")
     return buildOutput({
-      reply_text: buildPostTriageClientAck() + suffix,
+      reply_text: (ackAlreadySent
+        ? "Um atendente responderá em breve." + suffix
+        : buildPostTriageClientAck() + suffix),
       triage_completed: true,
       queue_id: queueId,
       reason: "post_triage_ack",
       menu_invalid_attempts: menuInvalidAttempts,
       investigation_adequate_rounds: investigationAdequateRounds,
       investigation_inadequate_streak: 0,
+      ...persistedOrgState,
     })
   }
 
@@ -688,6 +954,34 @@ export async function runPlatformOrchestrator(
     // ── FASE DE RESOLUÇÃO AUTÔNOMA ────────────────────────────────────────
     if (resolutionActive) {
       const outcome = detectResolutionOutcome(body)
+
+      // Frustração com a resposta da IA → escalada imediata sem gastar tentativa
+      if (isClientFrustrated(body) && outcome !== "resolved") {
+        const agent_handoff_summary = await buildAgentHandoffSummary({
+          kind: "resolution_client_requested_human",
+          queueName,
+          clienteNome: input.cliente.nome,
+          clienteTelefone: input.cliente.telefone,
+          lastUserMessage: body,
+          imageAnalysis: null,
+          resolutionAttempts,
+          resolutionProblemText,
+        })
+        return buildOutput({
+          reply_text:
+            `Entendido. Vou passar agora para um técnico especializado continuar seu atendimento de *${queueName}*. ` +
+            "Todas as informações já foram registradas." + suffix,
+          triage_completed: true,
+          queue_id: queueId,
+          reason: "resolution_client_frustrated",
+          agent_handoff_summary,
+          menu_invalid_attempts: menuInvalidAttempts,
+          investigation_adequate_rounds: investigationAdequateRounds,
+          investigation_inadequate_streak: 0,
+          resolution_active: false,
+          resolution_attempts: resolutionAttempts,
+        })
+      }
 
       // Pedido explícito de humano → handoff imediato
       if (outcome === "needs_human") {
@@ -780,6 +1074,8 @@ export async function runPlatformOrchestrator(
           queueName,
           attemptNumber: nextAttempt,
           previousSolutions: resolutionPrevSolutions,
+          tenantId: resolvedTenantId,
+          orgConfig: resolvedOrgConfig,
         })
         const novaPrevSolutions = JSON.stringify([...resolutionPrevSolutions, novaSolucao.slice(0, 300)])
 
@@ -812,6 +1108,64 @@ export async function runPlatformOrchestrator(
         resolution_problem_text: resolutionProblemText,
         resolution_prev_solutions: JSON.stringify(resolutionPrevSolutions),
       })
+    }
+
+    // ── RESOLUÇÃO ANTECIPADA — cliente resolveu sozinho durante a investigação ──
+    // Detecta antes do eval para não perguntar por evidência quando o chamado já foi encerrado.
+    if (!resolutionActive) {
+      const earlyOutcome = detectResolutionOutcome(body)
+      if (earlyOutcome === "resolved") {
+        const agent_handoff_summary = await buildAgentHandoffSummary({
+          kind: "resolution_success",
+          queueName,
+          clienteNome: input.cliente.nome,
+          clienteTelefone: input.cliente.telefone,
+          lastUserMessage: body,
+          imageAnalysis: null,
+          resolutionAttempts: 0,
+          resolutionProblemText: resolutionProblemText || body,
+        })
+        return buildOutput({
+          reply_text: buildResolutionSuccessReply(input.cliente.nome) + suffix,
+          triage_completed: true,
+          queue_id: queueId,
+          reason: "resolved_by_client_self_service",
+          agent_handoff_summary,
+          menu_invalid_attempts: menuInvalidAttempts,
+          investigation_adequate_rounds: investigationAdequateRounds,
+          investigation_inadequate_streak: 0,
+          resolution_active: false,
+          resolution_attempts: 0,
+          ...persistedOrgState,
+        })
+      }
+      if (earlyOutcome === "needs_human") {
+        const agent_handoff_summary = await buildAgentHandoffSummary({
+          kind: "resolution_client_requested_human",
+          queueName,
+          clienteNome: input.cliente.nome,
+          clienteTelefone: input.cliente.telefone,
+          lastUserMessage: body,
+          imageAnalysis: null,
+          resolutionAttempts: 0,
+          resolutionProblemText: resolutionProblemText || body,
+        })
+        return buildOutput({
+          reply_text:
+            `Claro. Estou transferindo seu atendimento de *${queueName}* para um técnico agora.\n\n` +
+            "Todas as informações já foram registradas para agilizar o atendimento." + suffix,
+          triage_completed: true,
+          queue_id: queueId,
+          reason: "investigation_client_requested_human",
+          agent_handoff_summary,
+          menu_invalid_attempts: menuInvalidAttempts,
+          investigation_adequate_rounds: investigationAdequateRounds,
+          investigation_inadequate_streak: 0,
+          resolution_active: false,
+          resolution_attempts: 0,
+          ...persistedOrgState,
+        })
+      }
     }
 
     // ── FASE DE INVESTIGAÇÃO ──────────────────────────────────────────────
@@ -865,14 +1219,18 @@ export async function runPlatformOrchestrator(
       queueName,
       userText: body,
       imageAnalysis: vision,
+      previousContext: updatedProblemText || undefined,
+      lastAiQuestion: lastAiReply || undefined,
+      inadequateStreak: investigationInadequateStreak,
     })) as InvestigationEvalResult
 
     // Evidência insuficiente / fora do tema
     if (evalResult.nivel !== "adequado") {
       const nextInadequateStreak = investigationInadequateStreak + 1
       const clientDifficulty = isClientReportingDifficulty(body)
+      const clientFrustrated = isClientFrustrated(body)
 
-      if (clientDifficulty || nextInadequateStreak >= INVESTIGATION_MAX_INADEQUATE_BEFORE_HANDOFF) {
+      if (clientDifficulty || clientFrustrated || nextInadequateStreak >= INVESTIGATION_MAX_INADEQUATE_BEFORE_HANDOFF) {
         const agent_handoff_summary = await buildAgentHandoffSummary({
           kind: "investigation_client_unclear",
           queueName,
@@ -883,14 +1241,19 @@ export async function runPlatformOrchestrator(
           evalNivel: evalResult.nivel,
           evalMotivoCurto: evalResult.motivoCurto,
         })
-        const clientMsg = clientDifficulty
-          ? `Entendi. Como você não consegue enviar todos os detalhes agora, seu atendimento seguirá com o time responsável pela fila *${queueName}*, que continuará por aqui.`
-          : `Ainda não consegui fechar o contexto técnico da demanda de *${queueName}* com segurança. Seu atendimento seguirá com o time responsável, que dará continuidade por aqui.`
+        let clientMsg: string
+        if (clientFrustrated) {
+          clientMsg = `Entendido. Vou encaminhar seu atendimento agora para um técnico que poderá te ajudar melhor com *${queueName}*. Em breve alguém dará continuidade por aqui.`
+        } else if (clientDifficulty) {
+          clientMsg = `Entendido. Como você não tem acesso às informações agora, um técnico responsável pela fila *${queueName}* continuará por aqui em breve.`
+        } else {
+          clientMsg = `Ainda não consegui mapear o problema com precisão. Vou encaminhar para um técnico especializado em *${queueName}* dar continuidade por aqui.`
+        }
         return buildOutput({
           reply_text: clientMsg + suffix,
           triage_completed: true,
           queue_id: queueId,
-          reason: clientDifficulty ? "investigation_client_difficulty" : "investigation_failed_clarification",
+          reason: clientFrustrated ? "investigation_client_frustrated" : clientDifficulty ? "investigation_client_difficulty" : "investigation_failed_clarification",
           agent_handoff_summary,
           menu_invalid_attempts: menuInvalidAttempts,
           investigation_adequate_rounds: investigationAdequateRounds,
@@ -922,6 +1285,8 @@ export async function runPlatformOrchestrator(
         queueName,
         attemptNumber: 1,
         previousSolutions: [],
+        tenantId: resolvedTenantId,
+        orgConfig: resolvedOrgConfig,
       })
 
       return buildOutput({
@@ -998,6 +1363,16 @@ export async function runPlatformOrchestrator(
   if (freeTextChoice.queueId) {
     const autoQueue = qlist.find((q) => String(q.id) === freeTextChoice.queueId)
     if (autoQueue) {
+      const fastPath = await tryFastPath({
+        body,
+        queue: autoQueue,
+        baseReason: "queue_auto_classified",
+        suffix,
+        menuInvalidAttempts: 0,
+        tenantId: resolvedTenantId,
+        orgConfig: resolvedOrgConfig,
+      })
+      if (fastPath) return fastPath
       return buildOutput({
         reply_text: buildInvestigationPrompt(autoQueue.name) + suffix,
         triage_completed: false,
@@ -1009,10 +1384,21 @@ export async function runPlatformOrchestrator(
       })
     }
   }
+
   const aiChoice = await inferQueueFromAI(qlist, body)
   if (aiChoice.queueId && aiChoice.confidence >= 0.65) {
     const aiQueue = qlist.find((q) => String(q.id) === aiChoice.queueId)
     if (aiQueue) {
+      const fastPath = await tryFastPath({
+        body,
+        queue: aiQueue,
+        baseReason: "queue_auto_classified_ai",
+        suffix,
+        menuInvalidAttempts: 0,
+        tenantId: resolvedTenantId,
+        orgConfig: resolvedOrgConfig,
+      })
+      if (fastPath) return fastPath
       return buildOutput({
         reply_text: buildInvestigationPrompt(aiQueue.name) + suffix,
         triage_completed: false,
@@ -1025,12 +1411,13 @@ export async function runPlatformOrchestrator(
     }
   }
 
-  // ── Sem classificação segura: pedir contexto mínimo (sem menu de opções) ─
+  // ── Sem classificação segura ──────────────────────────────────────────────
   const messageHasIntent = hasMeaningfulFreeText(body)
-  if (messageHasIntent) {
+  if (messageHasIntent && isTechnicalQuery(body)) {
+    // Has technical content but couldn't map to a queue — ask for 1 more detail
     return buildOutput({
       reply_text:
-        "Não consegui classificar com segurança ainda. Me envie em 1 frase: o que estava fazendo + erro exato na tela." +
+        "Recebi sua mensagem. Para direcionar com precisão, me informe em 1 frase: qual sistema ou equipamento e o que está acontecendo exatamente." +
         suffix,
       triage_completed: false,
       queue_id: null,
@@ -1041,13 +1428,14 @@ export async function runPlatformOrchestrator(
     })
   }
 
+  // Non-technical or very short message → welcoming ask
   const greeting = getGreetingByBrasiliaTime()
   const nome = normalizeText(input.cliente.nome)
   const saudacao = nome ? `${greeting}, ${nome}!` : `${greeting}!`
   return buildOutput({
     reply_text:
       `${saudacao}\n` +
-      "Para te direcionar com precisão, descreva em 1 frase o problema e, se tiver, o erro exato da tela." +
+      "Sou a Mavo AI. Me descreva o problema que está enfrentando e vou te ajudar a resolver." +
       suffix,
     triage_completed: false,
     queue_id: null,

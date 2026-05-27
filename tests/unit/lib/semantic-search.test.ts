@@ -31,7 +31,7 @@ describe("buscarSemantica", () => {
           solucao: "Reinstalar driver",
         },
       ],
-    })
+    } as any)
 
     const resultado = await buscarSemantica("impressora com problema")
 
@@ -60,12 +60,12 @@ describe("buscarSemantica", () => {
 
     vi.mocked(query).mockImplementation(async (sql: string) => {
       if (sql.includes("buscar_atendimentos_simples")) {
-        return { rows: fallbackRows }
+        return { rows: fallbackRows } as any
       }
       if (sql.includes("FROM atendimentos") && sql.includes("ORDER BY")) {
-        return { rows: [] }
+        return { rows: [] } as any
       }
-      return { rows: [] }
+      return { rows: [] } as any
     })
 
     const resultado = await buscarSemantica("rede sem acesso")
@@ -95,12 +95,12 @@ describe("buscarSemantica", () => {
               processado: true,
             },
           ],
-        }
+        } as any
       }
       if (sql.includes("FROM atendimentos") && sql.includes("ORDER BY")) {
-        return { rows: [] }
+        return { rows: [] } as any
       }
-      return { rows: [] }
+      return { rows: [] } as any
     })
 
     const resultado = await buscarSemantica("software travado")
@@ -113,12 +113,12 @@ describe("buscarSemantica", () => {
 
     vi.mocked(query).mockImplementation(async (sql: string) => {
       if (sql.includes("buscar_atendimentos_simples")) {
-        return { rows: [] }
+        return { rows: [] } as any
       }
       if (sql.includes("FROM atendimentos") && sql.includes("ORDER BY")) {
-        return { rows: [] }
+        return { rows: [] } as any
       }
-      return { rows: [] }
+      return { rows: [] } as any
     })
 
     const resultado = await buscarSemantica("xyz inexistente")
@@ -142,12 +142,12 @@ describe("buscarSemantica", () => {
 
     vi.mocked(query).mockImplementation(async (sql: string) => {
       if (sql.includes("buscar_atendimentos_simples")) {
-        return { rows }
+        return { rows } as any
       }
       if (sql.includes("FROM atendimentos") && sql.includes("ORDER BY")) {
-        return { rows: [] }
+        return { rows: [] } as any
       }
-      return { rows: [] }
+      return { rows: [] } as any
     })
 
     const resultado = await buscarSemantica("qualquer coisa problema", 2)

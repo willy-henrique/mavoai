@@ -22,10 +22,11 @@ type IntegrationRunContext = {
 function isMissingRelationError(error: unknown, tableName?: string) {
   const message =
     error instanceof Error ? error.message : String(error || "")
-  return (
-    message.includes("does not exist") &&
-    (!tableName || message.includes(`"${tableName}"`))
-  )
+  const isMissing =
+    message.includes("does not exist") ||
+    message.includes("não existe") ||
+    message.includes("no existe")
+  return isMissing && (!tableName || message.includes(`"${tableName}"`))
 }
 
 export async function startIntegrationRun(params: {

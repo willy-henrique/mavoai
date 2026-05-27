@@ -29,6 +29,7 @@ Evidências válidas (basta UMA):
 • Mensagem que já permite hipótese de diagnóstico, mesmo sem print
 • No contexto AUGE: rotina/módulo citado (ex.: cadastro de produtos, fiscal, relatório, financeiro, TEF/PIX)
 • No contexto fiscal: código de rejeição, CFOP/CST/CSOSN, operação, série/ambiente, ou erro de certificado/SEFAZ
+• Relato do tipo “Funcionou, mas agora [novo erro]” — classifique como adequado com base no novo erro descrito
 
 [2] “insuficiente” — use quando há intenção de suporte mas faltam dados mínimos para agir
 Exemplos típicos:
@@ -47,6 +48,8 @@ DÚVIDA entre insuficiente/fora_do_tema? Escolha “insuficiente” se a pessoa 
 • Analise texto + descrição de imagem juntos
 • Se contradizerem: priorize a evidência técnica mais confiável
 • Seja generoso: se houver qualquer sintoma técnico objetivo, classifique “adequado”
+• Use o CONTEXTO ANTERIOR da conversa para interpretar mensagens curtas ou ambíguas
+• Se o contexto anterior já forneceu evidências suficientes, classifique “adequado” mesmo que a mensagem atual seja curta
 • Nunca invente erro, equipamento, tela, módulo ou procedimento
 • Nunca prometa encaminhamento, visita, prazo ou correção
 • Nunca use emoji ou markdown na textoResposta
@@ -56,17 +59,19 @@ DÚVIDA entre insuficiente/fora_do_tema? Escolha “insuficiente” se a pessoa 
 • Exemplo: “Informou erro literal e módulo afetado” / “Relato vago, sem detalhe técnico”
 
 ━━━ REGRAS PARA textoResposta ━━━
-• Português do Brasil, cordial, profissional
-• Tom consultivo e técnico, sem gírias e sem informalidade excessiva
-• Pronta para enviar no WhatsApp — máx ~220 caracteres
-• Varie o estilo; não repita frases engessadas
-• “adequado”: reconheça brevemente, peça no máximo 1 complemento se realmente adicionar valor
-• “insuficiente”: peça APENAS o item mais crítico que está faltando (1 pedido, não 3)
-• “fora_do_tema”: redirecione educadamente para envio de detalhes técnicos
-• Se cliente não puder enviar print: aceite descrição por texto; não insista na imagem
-• Se cliente irritado: postura calma, objetiva, sem confronto
-• Use no máximo 2 frases curtas
-• Nunca diga que o problema foi resolvido nesta fase`
+• Tom natural e direto — como um colega técnico no WhatsApp, não como um atendente de call center
+• NUNCA comece com saudações (“Olá”, “Bom dia”, “Oi”) — o atendimento já está em andamento
+• NUNCA use frases de boas-vindas (“Para que possamos ajudá-lo”, “Ficamos à disposição”)
+• NUNCA use linguagem formal excessiva — seja humano, direto e simpático
+• Máximo 2 frases curtas — sem enrolação
+• “adequado”: 1 frase reconhecendo + no máximo 1 complemento útil
+• “insuficiente”: pergunte só 1 coisa, a mais importante que está faltando — NUNCA repita a mesma pergunta que já foi feita
+• “fora_do_tema”: redirecione em 1 frase curta e natural
+• Se cliente não puder enviar print: aceite texto, não insista na imagem
+• Se cliente irritado: seja calmo e direto, sem drama
+• Nunca diga que o problema foi resolvido nesta fase
+• Varie as frases — não repita sempre as mesmas expressões
+• Se ULTIMA_PERGUNTA_FEITA estiver preenchida, use-a para garantir que sua textoResposta seja DIFERENTE dessa pergunta`
 
 export function parseInvestigationEvalJson(raw: string): InvestigationEvalResult | null {
   let s = raw.trim()
@@ -94,19 +99,42 @@ export function parseInvestigationEvalJson(raw: string): InvestigationEvalResult
   }
 }
 
+const FALLBACK_TEXTS = [
+  "Qual mensagem ou código de erro aparece na tela? Me manda o texto exato ou uma foto.",
+  "Para avançar, me conta o que aparece na tela quando isso acontece — texto, código ou print.",
+  "Me diz: o que o sistema está mostrando exatamente nesse momento?",
+  "Qual é a mensagem de erro? Pode descrever ou tirar um print da tela.",
+  "Para seguir, preciso saber o que aparece na tela. Pode descrever em uma frase?",
+]
+
+function pickFallback(streak: number): string {
+  return FALLBACK_TEXTS[streak % FALLBACK_TEXTS.length]
+}
+
 export async function evaluateInvestigationTurn(params: {
   queueName: string
   userText: string
   imageAnalysis: string | null
+  previousContext?: string
+  lastAiQuestion?: string
+  inadequateStreak?: number
 }): Promise<InvestigationEvalResult> {
-  const { queueName, userText, imageAnalysis } = params
+  const { queueName, userText, imageAnalysis, previousContext, lastAiQuestion, inadequateStreak = 0 } = params
+
+  const contextSection = previousContext?.trim()
+    ? `CONTEXTO ANTERIOR DA CONVERSA (mensagens anteriores resumidas):\n${previousContext.slice(0, 800)}\n\n`
+    : ""
+
+  const lastQuestionSection = lastAiQuestion?.trim()
+    ? `ULTIMA_PERGUNTA_FEITA (não repita esta pergunta na textoResposta):\n"${lastAiQuestion.slice(0, 200)}"\n\n`
+    : ""
+
   const userPrompt = `DEMANDA SELECIONADA PELO CLIENTE (categoria do chamado): "${queueName}"
 
-TEXTO DESTA MENSAGEM:
+${contextSection}${lastQuestionSection}TEXTO DESTA MENSAGEM:
 ${userText.trim() || "(sem texto — apenas mídia ou vazio)"}
 
 ${imageAnalysis ? `DESCRICAO / CONCLUSAO DA ANALISE VISUAL (ja feita):\n${imageAnalysis}\n` : "Nenhuma analise de imagem disponivel para este turno.\n"}
-
 Classifique o turno e escreva textoResposta para o cliente.`
 
   try {
@@ -123,9 +151,6 @@ Classifique o turno e escreva textoResposta para o cliente.`
   return {
     nivel: "insuficiente",
     motivoCurto: "avaliacao indisponivel",
-    textoResposta:
-      "Não consegui validar sua mensagem agora. Envie um print da *tela do sistema* ou do equipamento relacionado a " +
-      queueName +
-      ", com a *mensagem de erro* visível se houver, ou descreva o sintoma em uma frase objetiva.",
+    textoResposta: pickFallback(inadequateStreak),
   }
 }

@@ -1,13 +1,27 @@
 // Teste de conexão PostgreSQL para MAVO.AI
 const { Pool } = require('pg');
 
-const config = {
-  host: 'localhost',
-  port: 5432,
-  user: 'postgres',
-  password: '1',
-  database: 'mavoai'
-};
+// Lê DATABASE_URL do ambiente se disponível, senão usa padrão local
+const dbUrl = process.env.DATABASE_URL;
+let config;
+if (dbUrl) {
+  const u = new URL(dbUrl);
+  config = {
+    host: u.hostname,
+    port: parseInt(u.port) || 5432,
+    user: u.username,
+    password: decodeURIComponent(u.password),
+    database: u.pathname.replace('/', '')
+  };
+} else {
+  config = {
+    host: 'localhost',
+    port: 5433,
+    user: 'postgres',
+    password: '1',
+    database: 'mavoai'
+  };
+}
 
 const pool = new Pool(config);
 
@@ -56,7 +70,7 @@ async function testConnection() {
       try {
         const countResult = await client.query(`SELECT COUNT(*) as count FROM ${table}`);
         console.log(`  📈 ${table}: ${countResult.rows[0].count} registros`);
-      } catch (e) {
+      } catch {
         // Tabela não existe ainda
       }
     }
@@ -70,7 +84,7 @@ async function testConnection() {
         const sampleResult = await client.query('SELECT nome FROM categorias LIMIT 3');
         console.log(`  Exemplos: ${sampleResult.rows.map(r => r.nome).join(', ')}...`);
       }
-    } catch (e) {
+    } catch {
       console.log('⚠️  Tabela "categorias" não encontrada');
     }
     
