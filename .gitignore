@@ -19,3 +19,8 @@ node_modules
 .DS_Store
 __pycache__/
 *.tsbuildinfo
+
+# Service account / credentials
+*-service-account*.json
+*-knowledge-*.json
+mavo-ai-*.json
