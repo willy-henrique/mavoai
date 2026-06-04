@@ -1,5 +1,6 @@
 import { gerarTextoIA } from "@/lib/ai-provider"
 import { selecionarConhecimento } from "@/lib/auge-knowledge"
+import { ANTI_HALLUCINATION_BLOCK } from "@/lib/escalation-detector"
 import type { OrgConfig } from "@/lib/org-loader"
 
 type TriageInput = {
@@ -58,6 +59,7 @@ REGRAS ABSOLUTAS
 3. Classifique prioridade ALTA ou CRÍTICA quando: emissão fiscal bloqueada, sistema produtivo inoperante, banco de dados inacessível, equipamento de vendas parado.
 4. Se o cliente pedir atendente/humano explicitamente → escalar imediatamente.
 5. Resposta ao cliente: máx 220 caracteres, sem emoji, linguagem direta e cordial.
+${ANTI_HALLUCINATION_BLOCK}
 5.1 Use tom profissional consultivo (sem gírias), com precisão técnica.
 6. Nunca solicite senha, token, certificado digital ou dados sensíveis.
 7. Fora do horário comercial: adicione aviso curto no final.

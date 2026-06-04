@@ -89,6 +89,7 @@ export function CerebroGrafo() {
   const [selectedInfo, setSelectedInfo] = useState<SimNode | null>(null)
   const [stats, setStats] = useState({ nodes: 0, links: 0 })
   const [tenantId, setTenantId] = useState("auge")
+  const [meta, setMeta] = useState<{ total_cases: number; embedded_cases: number; last_updated: string | null }>({ total_cases: 0, embedded_cases: 0, last_updated: null })
 
   const { data: orgs } = useSWR<OrgOption[]>("/api/organizations?active=true", orgFetcher)
 
@@ -269,7 +270,9 @@ export function CerebroGrafo() {
     try {
       const res = await fetch(`/api/cerebro/grafo?tenant_id=${tenantId}`)
       if (!res.ok) throw new Error("fetch failed")
-      const data: { nodes: GrafoNodeData[]; links: GrafoLinkData[] } = await res.json()
+      const data: { nodes: GrafoNodeData[]; links: GrafoLinkData[]; meta?: { total_cases: number; embedded_cases: number; last_updated: string | null } } = await res.json()
+
+      if (data.meta) setMeta(data.meta)
 
       const canvas = canvasRef.current
       const W = canvas?.width ?? 900
@@ -343,10 +346,36 @@ export function CerebroGrafo() {
     loadGraph().then(() => {
       rafRef.current = requestAnimationFrame(tick)
     })
+    // Auto-refresh: recarrega dados do DB a cada 60s (sem resetar a física)
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/cerebro/grafo?tenant_id=${tenantId}`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (data.meta) setMeta(data.meta)
+        // Atualiza val e casos sem resetar posições (reheat suave)
+        if (Array.isArray(data.nodes)) {
+          const valMap = new Map(data.nodes.map((n: GrafoNodeData) => [n.id, n]))
+          for (const node of nodes.current) {
+            const updated = valMap.get(node.id) as GrafoNodeData | undefined
+            if (updated) {
+              node.val = updated.val
+              ;(node as SimNode & { cases_total?: number; cases_embedded?: number; embedding_pct?: number }).cases_total = (updated as GrafoNodeData & { cases_total: number }).cases_total
+              ;(node as SimNode & { cases_embedded?: number }).cases_embedded = (updated as GrafoNodeData & { cases_embedded: number }).cases_embedded
+              ;(node as SimNode & { embedding_pct?: number }).embedding_pct = (updated as GrafoNodeData & { embedding_pct: number }).embedding_pct
+              node.radius = 3 + Math.min(7, (updated.val ?? 1) + 0.4)
+            }
+          }
+          alphaRef.current = Math.max(alphaRef.current, ALPHA_REHEAT * 0.3)
+        }
+      } catch { /* silencioso */ }
+    }, 60_000)
+
     return () => {
       cancelAnimationFrame(rafRef.current)
+      clearInterval(interval)
     }
-  }, [loadGraph, tick])
+  }, [loadGraph, tick, tenantId])
 
   // ── Mouse events ────────────────────────────────────────────────────────────
 
@@ -492,6 +521,11 @@ export function CerebroGrafo() {
           <Badge className="border-slate-400/20 bg-slate-400/10 text-slate-300 text-[10px]">
             {stats.links} conexões
           </Badge>
+          {meta.total_cases > 0 && (
+            <Badge className="border-blue-400/20 bg-blue-400/10 text-blue-300 text-[10px]">
+              {meta.embedded_cases}/{meta.total_cases} indexados
+            </Badge>
+          )}
         </div>
 
         {/* Company selector */}
@@ -600,13 +634,34 @@ export function CerebroGrafo() {
             <div className="space-y-2 text-[11px]">
               <div className="flex justify-between">
                 <span className="text-slate-500">Grupo</span>
-                <span className="text-slate-300">
+                <span className="text-slate-300 font-medium">
                   {GROUP_LABELS[selectedInfo.group] ?? selectedInfo.group}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Relevância</span>
-                <span className="text-slate-300">{selectedInfo.val}</span>
+                <span className="text-slate-500">Casos totais</span>
+                <span className="text-slate-200 font-mono font-semibold">
+                  {(selectedInfo as unknown as { cases_total?: number }).cases_total ?? selectedInfo.val}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Com embedding</span>
+                <span className="text-emerald-400 font-mono">
+                  {(selectedInfo as unknown as { cases_embedded?: number }).cases_embedded ?? "–"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Cobertura</span>
+                <span className={(((selectedInfo as unknown as { embedding_pct?: number }).embedding_pct ?? 0) >= 70) ? "text-emerald-400" : "text-amber-400"}>
+                  {(selectedInfo as unknown as { embedding_pct?: number }).embedding_pct ?? 0}%
+                </span>
+              </div>
+              {/* Barra de cobertura */}
+              <div className="w-full rounded-full bg-white/10 h-1.5 mt-1">
+                <div
+                  className="h-1.5 rounded-full bg-emerald-500 transition-all"
+                  style={{ width: `${Math.min((selectedInfo as unknown as { embedding_pct?: number }).embedding_pct ?? 0, 100)}%` }}
+                />
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Conexões</span>
@@ -615,12 +670,6 @@ export function CerebroGrafo() {
                     (l) => l.source === selectedInfo.id || l.target === selectedInfo.id,
                   ).length}
                 </span>
-              </div>
-              <div className="mt-3 pt-2 border-t border-white/8">
-                <span className="text-slate-500">{tenantId === "auge" ? "Módulo AUGE ERP" : "Categoria"}</span>
-                <p className="mt-1 text-slate-400 leading-snug">
-                  {selectedInfo.id.replace(/_/g, " ")}
-                </p>
               </div>
             </div>
             <button
@@ -638,8 +687,8 @@ export function CerebroGrafo() {
         {tenantId === "auge"
           ? Object.entries(GROUP_PALETTE).map(([group, color]) => (
               <div key={group} className="flex items-center gap-1.5">
-                <div className="size-1.5 rounded-full" style={{ backgroundColor: color }} />
-                <span className="text-[10px] text-slate-500">{GROUP_LABELS[group] ?? group}</span>
+                <div className="size-2 rounded-full" style={{ backgroundColor: color }} />
+                <span className="text-[10px] text-slate-400">{GROUP_LABELS[group] ?? group}</span>
               </div>
             ))
           : nodes.current
@@ -647,15 +696,32 @@ export function CerebroGrafo() {
               .map((n) => (
                 <div key={n.group} className="flex items-center gap-1.5">
                   <div
-                    className="size-1.5 rounded-full"
+                    className="size-2 rounded-full"
                     style={{ backgroundColor: n.group.startsWith("#") ? n.group : GROUP_PALETTE.geral }}
                   />
-                  <span className="text-[10px] text-slate-500">{n.label}</span>
+                  <span className="text-[10px] text-slate-400">{n.label}</span>
                 </div>
               ))}
-        <span className="ml-auto text-[10px] text-slate-600">
-          Scroll para zoom · Arraste para mover · Clique no nó para detalhes
-        </span>
+
+        {/* Totais do banco */}
+        {meta.total_cases > 0 && (
+          <div className="ml-auto flex items-center gap-3 text-[10px]">
+            <span className="text-slate-500">
+              <span className="text-slate-300 font-mono font-semibold">{meta.embedded_cases}</span>
+              /{meta.total_cases} casos indexados
+            </span>
+            {meta.last_updated && (
+              <span className="text-slate-600">
+                ↻ {new Date(meta.last_updated).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
+          </div>
+        )}
+        {meta.total_cases === 0 && (
+          <span className="ml-auto text-[10px] text-slate-600">
+            Scroll para zoom · Arraste para mover · Clique no nó para detalhes
+          </span>
+        )}
       </div>
     </div>
   )

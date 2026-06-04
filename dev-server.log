@@ -1,0 +1,55 @@
+
+> my-project@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://26.246.29.108:3000
+- Environments: .env.local
+✓ Ready in 1907ms
+
+ GET /api/health 200 in 8.7s (next.js: 7.8s, application-code: 892ms)
+ GET /api/health 200 in 531ms (next.js: 4ms, application-code: 526ms)
+{"level":"info","message":"ia_router_llm","timestamp":"2026-05-29T02:01:41.894Z","domain":"pdv","score":0.45226701686664544}
+{"level":"info","message":"orquestrador_mensagem_ok","timestamp":"2026-05-29T02:01:42.660Z","platform":"test_cli","organization_id":"auge","conversation_id":"first-pdv-0-1780020101040","reason":"queue_auto_classified_fast_resolution"}
+ POST /api/orquestrador/v1/mensagem 200 in 1614ms (next.js: 161ms, application-code: 1453ms)
+{"level":"info","message":"ia_router_llm","timestamp":"2026-05-29T02:01:46.266Z","domain":"fiscal","score":0.49613893835683387}
+{"level":"info","message":"orquestrador_mensagem_ok","timestamp":"2026-05-29T02:01:47.135Z","platform":"test_cli","organization_id":"auge","conversation_id":"first-fiscal-1-1780020105671","reason":"queue_auto_classified_fast_resolution"}
+ POST /api/orquestrador/v1/mensagem 200 in 1460ms (next.js: 3ms, application-code: 1457ms)
+{"level":"info","message":"ia_router_llm","timestamp":"2026-05-29T02:01:52.361Z","domain":"tef","score":0.6350006350009525}
+{"level":"info","message":"orquestrador_mensagem_ok","timestamp":"2026-05-29T02:01:53.298Z","platform":"test_cli","organization_id":"auge","conversation_id":"first-tef-2-1780020110152","reason":"queue_auto_classified_ai_fast_resolution"}
+ POST /api/orquestrador/v1/mensagem 200 in 3.1s (next.js: 3ms, application-code: 3.1s)
+{"level":"info","message":"ia_router_llm","timestamp":"2026-05-29T02:01:57.424Z","domain":"estoque","score":0.6201736729460423}
+{"level":"info","message":"orquestrador_mensagem_ok","timestamp":"2026-05-29T02:01:58.395Z","platform":"test_cli","organization_id":"auge","conversation_id":"first-estoque-3-1780020116314","reason":"queue_auto_classified_fast_resolution"}
+ POST /api/orquestrador/v1/mensagem 200 in 2.1s (next.js: 2ms, application-code: 2.1s)
+{"level":"info","message":"ia_router_fallback","timestamp":"2026-05-29T02:02:02.475Z","topScore":0.3216337604513384}
+{"level":"info","message":"orquestrador_mensagem_ok","timestamp":"2026-05-29T02:02:03.650Z","platform":"test_cli","organization_id":"auge","conversation_id":"first-hardware-4-1780020121404","reason":"queue_auto_classified_ai_fast_resolution"}
+ POST /api/orquestrador/v1/mensagem 200 in 2.2s (next.js: 2ms, application-code: 2.2s)
+{"level":"info","message":"ia_router_llm","timestamp":"2026-05-29T02:02:08.476Z","domain":"integracao","score":0.4444444444444444}
+{"level":"info","message":"orquestrador_mensagem_ok","timestamp":"2026-05-29T02:02:09.609Z","platform":"test_cli","organization_id":"auge","conversation_id":"first-integracao-5-1780020126666","reason":"queue_auto_classified_ai_fast_resolution"}
+ POST /api/orquestrador/v1/mensagem 200 in 2.9s (next.js: 2ms, application-code: 2.9s)
+ PATCH /api/v1/specialist-agents/a08f8997-d9ba-4f3b-a7d8-2e080029ed17 200 in 1250ms (next.js: 1220ms, application-code: 30ms)
+ PATCH /api/v1/specialist-agents/626b21e0-0f70-4abd-9af7-6027538dd64d 200 in 23ms (next.js: 13ms, application-code: 11ms)
+ PATCH /api/v1/specialist-agents/c41a305a-e3c5-48be-877d-779996f68192 200 in 13ms (next.js: 4ms, application-code: 9ms)
+ PATCH /api/v1/specialist-agents/990eabc2-f3a2-49d9-8dfd-afa18d1054f0 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ PATCH /api/v1/specialist-agents/25c45107-475a-48e5-8fdd-f2df7c30c952 200 in 9ms (next.js: 2ms, application-code: 7ms)
+ PATCH /api/v1/specialist-agents/e25b7a46-c03c-4f23-a56d-080742930540 200 in 17ms (next.js: 2ms, application-code: 15ms)
+ GET /api/health 200 in 314ms (next.js: 1936µs, application-code: 312ms)
+{"level":"info","message":"ia_router_llm","timestamp":"2026-05-29T02:13:06.915Z","domain":"pdv","score":0.45226701686664544}
+{"level":"info","message":"orquestrador_mensagem_ok","timestamp":"2026-05-29T02:13:07.576Z","platform":"test_cli","organization_id":"auge","conversation_id":"first-pdv-0-1780020786420","reason":"queue_auto_classified_fast_resolution"}
+ POST /api/orquestrador/v1/mensagem 200 in 1150ms (next.js: 2ms, application-code: 1148ms)
+{"level":"info","message":"ia_router_llm","timestamp":"2026-05-29T02:13:11.228Z","domain":"fiscal","score":0.49613893835683387}
+{"level":"info","message":"orquestrador_mensagem_ok","timestamp":"2026-05-29T02:13:12.212Z","platform":"test_cli","organization_id":"auge","conversation_id":"first-fiscal-1-1780020790588","reason":"queue_auto_classified_fast_resolution"}
+ POST /api/orquestrador/v1/mensagem 200 in 1622ms (next.js: 3ms, application-code: 1620ms)
+{"level":"info","message":"ia_router_llm","timestamp":"2026-05-29T02:13:15.900Z","domain":"tef","score":0.6350006350009525}
+{"level":"info","message":"orquestrador_mensagem_ok","timestamp":"2026-05-29T02:13:16.755Z","platform":"test_cli","organization_id":"auge","conversation_id":"first-tef-2-1780020795218","reason":"queue_auto_classified_ai_fast_resolution"}
+ POST /api/orquestrador/v1/mensagem 200 in 1536ms (next.js: 3ms, application-code: 1533ms)
+{"level":"info","message":"ia_router_llm","timestamp":"2026-05-29T02:13:21.304Z","domain":"estoque","score":0.6201736729460423}
+{"level":"info","message":"orquestrador_mensagem_ok","timestamp":"2026-05-29T02:13:23.696Z","platform":"test_cli","organization_id":"auge","conversation_id":"first-estoque-3-1780020799766","reason":"queue_auto_classified_fast_resolution"}
+ POST /api/orquestrador/v1/mensagem 200 in 3.9s (next.js: 1910µs, application-code: 3.9s)
+{"level":"info","message":"ia_router_fallback","timestamp":"2026-05-29T02:13:27.362Z","topScore":0.3216337604513384}
+{"level":"info","message":"orquestrador_mensagem_ok","timestamp":"2026-05-29T02:13:28.027Z","platform":"test_cli","organization_id":"auge","conversation_id":"first-hardware-4-1780020806699","reason":"queue_auto_classified_ai_fast_resolution"}
+ POST /api/orquestrador/v1/mensagem 200 in 1326ms (next.js: 1978µs, application-code: 1324ms)
+{"level":"info","message":"ia_router_llm","timestamp":"2026-05-29T02:13:32.413Z","domain":"integracao","score":0.4444444444444444}
+{"level":"info","message":"orquestrador_mensagem_ok","timestamp":"2026-05-29T02:13:33.485Z","platform":"test_cli","organization_id":"auge","conversation_id":"first-integracao-5-1780020811040","reason":"queue_auto_classified_ai_fast_resolution"}
+ POST /api/orquestrador/v1/mensagem 200 in 2.4s (next.js: 2ms, application-code: 2.4s)

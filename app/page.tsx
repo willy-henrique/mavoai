@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useCallback } from "react"
 import {
   Activity,
   Bell,
@@ -94,10 +94,22 @@ const NAV_TABS = [
 export default function Home() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [activeTab, setActiveTab] = useState("dashboard")
+  const [globalSearch, setGlobalSearch] = useState("")
+  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleAtendimentoCriado = () => {
     setRefreshKey((prev) => prev + 1)
   }
+
+  const handleGlobalSearch = useCallback((value: string) => {
+    setGlobalSearch(value)
+    if (searchDebounce.current) clearTimeout(searchDebounce.current)
+    if (value.trim().length >= 3) {
+      searchDebounce.current = setTimeout(() => {
+        setActiveTab("buscar")
+      }, 300)
+    }
+  }, [])
 
   return (
     <Tabs
@@ -191,6 +203,13 @@ export default function Home() {
               <Input
                 className="h-10 rounded-full border-slate-200 bg-slate-100/80 pl-9 shadow-none focus-visible:bg-white"
                 placeholder="Buscar atendimento, cliente ou categoria..."
+                value={globalSearch}
+                onChange={(e) => handleGlobalSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && globalSearch.trim()) {
+                    setActiveTab("buscar")
+                  }
+                }}
               />
             </div>
 

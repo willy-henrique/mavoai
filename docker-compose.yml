@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: "1"
     ports:
-      - "5434:5432"
+      - "6001:5432"
     volumes:
       - mavoai_postgres_data:/var/lib/postgresql/data
       # SETUP COMPLETO: roda automaticamente ao criar o container pela primeira vez.

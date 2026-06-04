@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import useSWR from "swr"
 import {
   Activity,
@@ -48,6 +49,8 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
+import { AgentConfigSheet, type AgentId as AgentConfigId } from "@/components/agente-config-sheet"
+import { SpecialistAgentsPanel } from "@/components/specialist-agents-panel"
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json())
 
@@ -342,6 +345,9 @@ export function Dashboard() {
 
       {/* ── Agentes do Cérebro ─────────────────────────────────────────── */}
       <AgentRoster health={health} />
+
+      {/* ── Agentes Especialistas ──────────────────────────────────────── */}
+      <SpecialistAgentsPanel />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(22rem,0.65fr)]">
         <Card className="rounded-lg border-slate-200 bg-white/95 shadow-sm">
@@ -921,16 +927,26 @@ function resolveAgentStatus(
 function AgentCard({
   agent,
   health,
+  onClick,
 }: {
   agent: AgentDef
   health?: HealthStatus
+  onClick?: () => void
 }) {
   const status = resolveAgentStatus(agent, health)
   const Icon = agent.icon
   const colors = AGENT_COLOR_MAP[agent.color] ?? AGENT_COLOR_MAP.slate
 
   return (
-    <div className="flex gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+    <div
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick() } } : undefined}
+      onClick={onClick}
+      className={`flex gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all hover:shadow-md ${
+        onClick ? "cursor-pointer hover:border-slate-300 hover:ring-2 hover:ring-offset-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 " + (colors.ring ?? "hover:ring-slate-200") : ""
+      }`}
+    >
       <span
         className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg ring-1 ${colors.icon}`}
       >
@@ -984,6 +1000,8 @@ function AgentCard({
 }
 
 function AgentRoster({ health }: { health?: HealthStatus }) {
+  const [selectedAgentId, setSelectedAgentId] = useState<AgentConfigId | null>(null)
+
   const activeCount = AGENT_ROSTER.filter(
     (a) => resolveAgentStatus(a, health) === "online",
   ).length
@@ -992,37 +1010,50 @@ function AgentRoster({ health }: { health?: HealthStatus }) {
   ).length
 
   return (
-    <Card className="rounded-lg border-slate-200 bg-white/95 shadow-sm">
-      <CardHeader className="flex-row items-start justify-between gap-3 pb-3">
-        <div>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <BrainCircuit className="size-4 text-emerald-600" />
-            Agentes do Cérebro
-          </CardTitle>
-          <CardDescription>
-            Pipeline multiagente: orquestrador + triagem + investigação + resolução autônoma + curadoria.
-          </CardDescription>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="inline-flex h-9 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700">
-            <span className="size-2 rounded-full bg-emerald-500" />
-            {activeCount} online
-          </span>
-          {degradedCount > 0 && (
-            <span className="inline-flex h-9 items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-700">
-              <span className="size-2 rounded-full bg-amber-500" />
-              {degradedCount} degradado{degradedCount > 1 ? "s" : ""}
+    <>
+      <Card className="rounded-lg border-slate-200 bg-white/95 shadow-sm">
+        <CardHeader className="flex-row items-start justify-between gap-3 pb-3">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <BrainCircuit className="size-4 text-emerald-600" />
+              Agentes do Cérebro
+            </CardTitle>
+            <CardDescription>
+              Pipeline multiagente: orquestrador + triagem + investigação + resolução autônoma + curadoria.{" "}
+              <span className="font-medium text-slate-600">Clique em um agente para configurá-lo.</span>
+            </CardDescription>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="inline-flex h-9 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700">
+              <span className="size-2 rounded-full bg-emerald-500" />
+              {activeCount} online
             </span>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {AGENT_ROSTER.map((agent) => (
-            <AgentCard key={agent.id} agent={agent} health={health} />
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+            {degradedCount > 0 && (
+              <span className="inline-flex h-9 items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-700">
+                <span className="size-2 rounded-full bg-amber-500" />
+                {degradedCount} degradado{degradedCount > 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {AGENT_ROSTER.map((agent) => (
+              <AgentCard
+                key={agent.id}
+                agent={agent}
+                health={health}
+                onClick={() => setSelectedAgentId(agent.id as AgentConfigId)}
+              />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <AgentConfigSheet
+        agentId={selectedAgentId}
+        onClose={() => setSelectedAgentId(null)}
+      />
+    </>
   )
 }

@@ -14,14 +14,17 @@ import {
   Database,
   ExternalLink,
   GitFork,
+  Globe,
   Key,
   Link2,
   MessageSquare,
+  Plus,
   RefreshCw,
   Server,
   Settings,
   ShieldCheck,
   Terminal,
+  Trash2,
   Webhook,
   WifiOff,
   Workflow,
@@ -30,11 +33,31 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Spinner } from "@/components/ui/spinner"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+interface CustomService {
+  id: string
+  name: string
+  description: string
+  url: string
+  tags: string[]
+  color: string
+}
 
 interface ServicePing {
   ok: boolean
@@ -62,6 +85,47 @@ interface ConfigData {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const CUSTOM_SERVICES_KEY = "hub_custom_services"
+
+const COLOR_OPTIONS = [
+  { value: "bg-orange-400", label: "Laranja", dot: "bg-orange-400" },
+  { value: "bg-emerald-400", label: "Verde", dot: "bg-emerald-400" },
+  { value: "bg-blue-400", label: "Azul", dot: "bg-blue-400" },
+  { value: "bg-purple-400", label: "Roxo", dot: "bg-purple-400" },
+  { value: "bg-red-400", label: "Vermelho", dot: "bg-red-400" },
+  { value: "bg-amber-400", label: "Amarelo", dot: "bg-amber-400" },
+  { value: "bg-slate-400", label: "Cinza", dot: "bg-slate-400" },
+]
+
+function useCustomServices() {
+  const [services, setServices] = useState<CustomService[]>([])
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(CUSTOM_SERVICES_KEY)
+      if (stored) setServices(JSON.parse(stored))
+    } catch {}
+  }, [])
+
+  const add = useCallback((data: Omit<CustomService, "id">) => {
+    setServices((prev) => {
+      const updated = [...prev, { ...data, id: crypto.randomUUID() }]
+      localStorage.setItem(CUSTOM_SERVICES_KEY, JSON.stringify(updated))
+      return updated
+    })
+  }, [])
+
+  const remove = useCallback((id: string) => {
+    setServices((prev) => {
+      const updated = prev.filter((s) => s.id !== id)
+      localStorage.setItem(CUSTOM_SERVICES_KEY, JSON.stringify(updated))
+      return updated
+    })
+  }, [])
+
+  return { services, add, remove }
+}
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -158,9 +222,10 @@ interface ServiceCardProps {
   onRefresh: () => void
   color: string
   tags?: string[]
+  onDelete?: () => void
 }
 
-function ServiceCard({ icon: Icon, name, description, url, ping, pingLoading, onRefresh, color, tags }: ServiceCardProps) {
+function ServiceCard({ icon: Icon, name, description, url, ping, pingLoading, onRefresh, color, tags, onDelete }: ServiceCardProps) {
   return (
     <Card className="relative overflow-hidden border-slate-200 bg-white shadow-sm">
       <div className={`absolute inset-y-0 left-0 w-1 ${color}`} />
@@ -180,6 +245,17 @@ function ServiceCard({ icon: Icon, name, description, url, ping, pingLoading, on
           </div>
 
           <div className="flex gap-1.5 shrink-0">
+            {onDelete && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 text-slate-300 hover:text-red-400 hover:bg-red-50"
+                onClick={onDelete}
+                title="Remover serviço"
+              >
+                <Trash2 className="size-3" />
+              </Button>
+            )}
             <Button variant="ghost" size="icon" className="size-7 text-slate-400" onClick={onRefresh}>
               <RefreshCw className="size-3" />
             </Button>
@@ -232,6 +308,144 @@ function ServiceCard({ icon: Icon, name, description, url, ping, pingLoading, on
         )}
       </CardContent>
     </Card>
+  )
+}
+
+// ─── Custom Service Card ──────────────────────────────────────────────────────
+
+function CustomServiceCard({ service, onDelete }: { service: CustomService; onDelete: () => void }) {
+  const { ping, loading, refresh } = usePing(service.url)
+  return (
+    <ServiceCard
+      icon={Globe}
+      name={service.name}
+      description={service.description}
+      url={service.url}
+      ping={ping}
+      pingLoading={loading}
+      onRefresh={refresh}
+      color={service.color}
+      tags={service.tags}
+      onDelete={onDelete}
+    />
+  )
+}
+
+// ─── Add Service Dialog ───────────────────────────────────────────────────────
+
+function AddServiceDialog({ onAdd }: { onAdd: (s: Omit<CustomService, "id">) => void }) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState("")
+  const [url, setUrl] = useState("")
+  const [description, setDescription] = useState("")
+  const [tags, setTags] = useState("")
+  const [color, setColor] = useState("bg-blue-400")
+
+  const reset = () => {
+    setName(""); setUrl(""); setDescription(""); setTags(""); setColor("bg-blue-400")
+  }
+
+  const handleSubmit = () => {
+    if (!name.trim() || !url.trim()) return
+    onAdd({
+      name: name.trim(),
+      url: url.trim(),
+      description: description.trim(),
+      tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+      color,
+    })
+    reset()
+    setOpen(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset() }}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs border-dashed">
+          <Plus className="size-3" />
+          Adicionar serviço
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-sm font-semibold">Adicionar serviço externo</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-3 py-1">
+          <div className="space-y-1">
+            <Label className="text-xs">Nome <span className="text-red-400">*</span></Label>
+            <Input
+              placeholder="Ex: Grafana, Metabase..."
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="h-8 text-sm"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs">URL de acesso <span className="text-red-400">*</span></Label>
+            <Input
+              placeholder="http://localhost:3001"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              className="h-8 text-sm font-mono"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs">Descrição</Label>
+            <Input
+              placeholder="Breve descrição do serviço"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="h-8 text-sm"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs">Tags <span className="text-slate-400 font-normal">(separadas por vírgula)</span></Label>
+            <Input
+              placeholder="monitoramento, banco, api"
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+              className="h-8 text-sm"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Cor do card</Label>
+            <div className="flex gap-2 flex-wrap">
+              {COLOR_OPTIONS.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  title={c.label}
+                  onClick={() => setColor(c.value)}
+                  className={`size-6 rounded-full ${c.dot} transition-all ${
+                    color === c.value ? "ring-2 ring-offset-2 ring-slate-400 scale-110" : "opacity-70 hover:opacity-100"
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <DialogClose asChild>
+            <Button variant="ghost" size="sm" className="h-8 text-xs">Cancelar</Button>
+          </DialogClose>
+          <Button
+            size="sm"
+            className="h-8 text-xs bg-slate-900 hover:bg-slate-800"
+            onClick={handleSubmit}
+            disabled={!name.trim() || !url.trim()}
+          >
+            <Plus className="size-3 mr-1" />
+            Adicionar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -481,7 +695,9 @@ export function HubPanel() {
   const n8n = usePing(n8nBase, undefined)
   const willtalk = usePing(null, "willtalk")
 
-  const services = [
+  const { services: customServices, add: addCustomService, remove: removeCustomService } = useCustomServices()
+
+  const builtinServices = [
     {
       icon: Workflow,
       name: "n8n",
@@ -515,9 +731,12 @@ export function HubPanel() {
             <h2 className="text-base font-semibold text-slate-900">Serviços externos</h2>
             <p className="text-xs text-slate-500 mt-0.5">Acesso direto aos serviços do ecossistema Mavo AI</p>
           </div>
-          <div className="flex items-center gap-1 text-xs text-slate-400">
-            <RefreshCw className="size-3" />
-            Atualiza a cada 30s
+          <div className="flex items-center gap-3">
+            <AddServiceDialog onAdd={addCustomService} />
+            <div className="flex items-center gap-1 text-xs text-slate-400">
+              <RefreshCw className="size-3" />
+              Atualiza a cada 30s
+            </div>
           </div>
         </div>
 
@@ -527,8 +746,11 @@ export function HubPanel() {
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
-            {services.map((s) => (
+            {builtinServices.map((s) => (
               <ServiceCard key={s.name} {...s} />
+            ))}
+            {customServices.map((s) => (
+              <CustomServiceCard key={s.id} service={s} onDelete={() => removeCustomService(s.id)} />
             ))}
           </div>
         )}

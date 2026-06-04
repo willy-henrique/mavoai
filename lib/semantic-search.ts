@@ -65,15 +65,26 @@ export async function buscarSemantica(
     )
 
     if (Array.isArray(result.rows)) {
-      return result.rows.map((row: any) => ({
-        id: row.id,
-        similaridade: Number(row.similaridade ?? 0),
-        resumo_problema: row.resumo_problema || "",
-        causa: row.causa ?? null,
-        solucao: row.solucao ?? null,
-        estrategia: "vetorial",
-        score_lexical: undefined,
-      }))
+      const termos = normalizarTermosBusca(texto)
+      return result.rows
+        .map((row: any) => {
+          const base = [row.resumo_problema, row.problema, row.causa, row.solucao]
+            .filter(Boolean).join(" ")
+          const scoreLex = calcularScoreLexical(base, termos)
+          const scoreVet = Number(row.similaridade ?? 0)
+          // Score híbrido: 70% vetorial + 30% lexical — favorece semântica mas não ignora keywords exatas
+          const scoreHibrid = scoreVet * 0.7 + scoreLex * 0.3
+          return {
+            id: row.id,
+            similaridade: scoreHibrid,
+            resumo_problema: row.resumo_problema || "",
+            causa: row.causa ?? null,
+            solucao: row.solucao ?? null,
+            estrategia: "vetorial" as const,
+            score_lexical: scoreLex,
+          }
+        })
+        .sort((a, b) => b.similaridade - a.similaridade)
     }
   } catch (error) {
     logger.warn("busca_vetorial_indisponivel", {

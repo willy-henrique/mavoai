@@ -1,7 +1,5 @@
 import { query } from "@/lib/database/postgres-client-no-vector"
 import { NextResponse } from "next/server"
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require("pdf-parse")
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -139,6 +137,8 @@ export async function POST(request: Request) {
   let text = ""
   try {
     if (fileName.endsWith(".pdf")) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pdfParse = require("pdf-parse/lib/pdf-parse")
       const parsed = await pdfParse(buffer)
       text = parsed.text as string
     } else {

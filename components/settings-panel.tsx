@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import useSWR from "swr"
+import { useState, useCallback } from "react"
+import useSWR, { mutate } from "swr"
 import {
   Card,
   CardContent,
@@ -63,6 +63,11 @@ import {
   Server,
   Shield,
   MessageSquareDot,
+  BrainCircuit,
+  Eye,
+  EyeOff,
+  Save,
+  FlaskConical,
 } from "lucide-react"
 import type { Categoria } from "@/lib/types"
 
@@ -1214,6 +1219,425 @@ function ConfiguracaoSection() {
   )
 }
 
+// ─── Modelos IA ───────────────────────────────────────────────────────────────
+
+interface ModelConfigData {
+  effective: {
+    ai_base_url: string
+    ai_chat_model: string
+    ai_curator_model: string
+    ai_api_key_set: boolean
+    ai_api_key_masked: string
+    ai_api_key_source: "db" | "env" | "none"
+    embedding_base_url: string
+    embedding_model: string
+    embedding_dimensions: string
+    embedding_api_key_set: boolean
+    embedding_api_key_masked: string
+    embedding_api_key_source: "db" | "env" | "none"
+  }
+  raw_keys: string[]
+}
+
+const AI_PRESETS = [
+  {
+    label: "Groq",
+    base_url: "https://api.groq.com/openai/v1",
+    chat_model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    curator_model: "meta-llama/llama-4-maverick-17b-128e-instruct",
+  },
+  {
+    label: "Gemini",
+    base_url: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    chat_model: "gemini-2.0-flash",
+    curator_model: "gemini-2.0-flash",
+  },
+  {
+    label: "OpenRouter",
+    base_url: "https://openrouter.ai/api/v1",
+    chat_model: "meta-llama/llama-3.3-70b-instruct:free",
+    curator_model: "deepseek/deepseek-r1:free",
+  },
+  {
+    label: "OpenAI",
+    base_url: "https://api.openai.com/v1",
+    chat_model: "gpt-4o-mini",
+    curator_model: "gpt-4o",
+  },
+  {
+    label: "xAI",
+    base_url: "https://api.x.ai/v1",
+    chat_model: "grok-3-mini",
+    curator_model: "grok-3",
+  },
+]
+
+const EMBED_PRESETS = [
+  {
+    label: "Jina AI",
+    base_url: "https://api.jina.ai/v1",
+    model: "jina-embeddings-v5-text-small",
+    dims: "1024",
+  },
+  {
+    label: "Gemini",
+    base_url: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    model: "text-embedding-004",
+    dims: "768",
+  },
+  {
+    label: "OpenAI",
+    base_url: "https://api.openai.com/v1",
+    model: "text-embedding-3-small",
+    dims: "1536",
+  },
+]
+
+function KeySourceBadge({ source }: { source: "db" | "env" | "none" }) {
+  if (source === "db")
+    return <Badge className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">DB</Badge>
+  if (source === "env")
+    return <Badge className="text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200">ENV</Badge>
+  return <Badge variant="destructive" className="text-xs">Ausente</Badge>
+}
+
+function ModelosIASection() {
+  const { data, isLoading, error } = useSWR<ModelConfigData>(
+    "/api/config/models-ui",
+    fetcher,
+    { revalidateOnFocus: false },
+  )
+
+  const [form, setForm] = useState({
+    ai_base_url: "",
+    ai_chat_model: "",
+    ai_curator_model: "",
+    ai_api_key: "",
+    embedding_base_url: "",
+    embedding_model: "",
+    embedding_api_key: "",
+    embedding_dimensions: "",
+  })
+
+  const [showAiKey, setShowAiKey]     = useState(false)
+  const [showEmbedKey, setShowEmbedKey] = useState(false)
+  const [saving, setSaving]           = useState(false)
+  const [testing, setTesting]         = useState(false)
+  const [testResult, setTestResult]   = useState<{ ok: boolean; msg: string } | null>(null)
+  const [saveMsg, setSaveMsg]         = useState<string | null>(null)
+
+  const eff = data?.effective
+
+  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((f) => ({ ...f, [key]: e.target.value }))
+
+  const applyAiPreset = (preset: (typeof AI_PRESETS)[number]) => {
+    setForm((f) => ({
+      ...f,
+      ai_base_url: preset.base_url,
+      ai_chat_model: preset.chat_model,
+      ai_curator_model: preset.curator_model,
+    }))
+  }
+
+  const applyEmbedPreset = (preset: (typeof EMBED_PRESETS)[number]) => {
+    setForm((f) => ({
+      ...f,
+      embedding_base_url: preset.base_url,
+      embedding_model: preset.model,
+      embedding_dimensions: preset.dims,
+    }))
+  }
+
+  const handleSave = useCallback(async () => {
+    setSaving(true)
+    setSaveMsg(null)
+    try {
+      const resp = await fetch("/api/config/models-ui", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      })
+      const json = await resp.json()
+      if (resp.ok) {
+        setSaveMsg("Configuração salva. Ativa em até 30s.")
+        mutate("/api/config/models-ui")
+        setForm((f) => ({ ...f, ai_api_key: "", embedding_api_key: "" }))
+      } else {
+        setSaveMsg(`Erro: ${json.error ?? "desconhecido"}`)
+      }
+    } catch {
+      setSaveMsg("Erro de rede ao salvar.")
+    } finally {
+      setSaving(false)
+    }
+  }, [form])
+
+  const handleTest = useCallback(async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const resp = await fetch("/api/health")
+      const json = await resp.json()
+      const chatOk  = json?.checks?.ai_chat?.ok
+      const embedOk = json?.checks?.embedding?.ok
+      if (chatOk && embedOk) {
+        setTestResult({ ok: true, msg: `Chat ✓ ${json.checks.ai_chat.latency_ms}ms · Embedding ✓ ${json.checks.embedding.latency_ms}ms` })
+      } else {
+        const problems = [
+          !chatOk  ? `Chat: ${json.checks.ai_chat?.error ?? "falha"}` : null,
+          !embedOk ? `Embedding: ${json.checks.embedding?.error ?? "falha"}` : null,
+        ].filter(Boolean).join(" | ")
+        setTestResult({ ok: false, msg: problems || "Falha desconhecida" })
+      }
+    } catch {
+      setTestResult({ ok: false, msg: "Sem resposta do servidor" })
+    } finally {
+      setTesting(false)
+    }
+  }, [])
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Spinner className="h-6 w-6" />
+      </div>
+    )
+  }
+
+  if (error || !eff) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 dark:bg-red-950 p-4 text-sm text-red-700 dark:text-red-300">
+        Erro ao carregar configuração. Verifique se CEREBRO_INTERNAL_TOKEN está configurado no servidor.
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <p className="text-xs text-muted-foreground">
+        Valores salvos aqui têm precedência sobre env vars e entram em vigor sem restart
+        (cache de 30s). Deixe campos em branco para manter o valor atual.
+      </p>
+
+      {/* ── LLM (Chat + Curadoria) ─────────────────────────────────────────── */}
+      <div className="rounded-lg border">
+        <div className="flex items-center gap-2 px-4 py-3 border-b bg-muted/30">
+          <BrainCircuit className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-semibold">Modelo LLM (Chat + Curadoria)</span>
+          <div className="ml-auto flex gap-1">
+            {AI_PRESETS.map((p) => (
+              <Button
+                key={p.label}
+                variant="outline"
+                size="sm"
+                className="h-6 text-xs px-2"
+                onClick={() => applyAiPreset(p)}
+              >
+                {p.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-4 grid grid-cols-1 gap-3">
+          {/* Ativo agora */}
+          <div className="grid grid-cols-3 gap-3 text-xs text-muted-foreground pb-2 border-b">
+            <div>
+              <span className="block font-medium text-foreground/70 mb-0.5">Base URL ativa</span>
+              <span className="font-mono">{eff.ai_base_url}</span>
+            </div>
+            <div>
+              <span className="block font-medium text-foreground/70 mb-0.5">Modelo chat</span>
+              <span className="font-mono">{eff.ai_chat_model}</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <div>
+                <span className="block font-medium text-foreground/70 mb-0.5">API Key</span>
+                <span className="font-mono">{eff.ai_api_key_masked || "não configurada"}</span>
+              </div>
+              <KeySourceBadge source={eff.ai_api_key_source} />
+            </div>
+          </div>
+
+          {/* Campos de edição */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium">Base URL</label>
+              <Input
+                placeholder={eff.ai_base_url}
+                value={form.ai_base_url}
+                onChange={set("ai_base_url")}
+                className="text-xs font-mono h-8"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium">Modelo Chat</label>
+              <Input
+                placeholder={eff.ai_chat_model}
+                value={form.ai_chat_model}
+                onChange={set("ai_chat_model")}
+                className="text-xs font-mono h-8"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium">Modelo Curadoria (Curator)</label>
+              <Input
+                placeholder={eff.ai_curator_model}
+                value={form.ai_curator_model}
+                onChange={set("ai_curator_model")}
+                className="text-xs font-mono h-8"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium">API Key</label>
+              <div className="relative">
+                <Input
+                  type={showAiKey ? "text" : "password"}
+                  placeholder={eff.ai_api_key_set ? eff.ai_api_key_masked : "sk-... ou gsk_..."}
+                  value={form.ai_api_key}
+                  onChange={set("ai_api_key")}
+                  className="text-xs font-mono h-8 pr-8"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAiKey((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showAiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Embedding ─────────────────────────────────────────────────────────── */}
+      <div className="rounded-lg border">
+        <div className="flex items-center gap-2 px-4 py-3 border-b bg-muted/30">
+          <Zap className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-semibold">Modelo Embedding (Vetorial)</span>
+          <div className="ml-auto flex gap-1">
+            {EMBED_PRESETS.map((p) => (
+              <Button
+                key={p.label}
+                variant="outline"
+                size="sm"
+                className="h-6 text-xs px-2"
+                onClick={() => applyEmbedPreset(p)}
+              >
+                {p.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-4 grid grid-cols-1 gap-3">
+          {/* Ativo agora */}
+          <div className="grid grid-cols-3 gap-3 text-xs text-muted-foreground pb-2 border-b">
+            <div>
+              <span className="block font-medium text-foreground/70 mb-0.5">Base URL ativa</span>
+              <span className="font-mono">{eff.embedding_base_url}</span>
+            </div>
+            <div>
+              <span className="block font-medium text-foreground/70 mb-0.5">Modelo</span>
+              <span className="font-mono">{eff.embedding_model}</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <div>
+                <span className="block font-medium text-foreground/70 mb-0.5">API Key</span>
+                <span className="font-mono">{eff.embedding_api_key_masked || "não configurada"}</span>
+              </div>
+              <KeySourceBadge source={eff.embedding_api_key_source} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium">Base URL</label>
+              <Input
+                placeholder={eff.embedding_base_url}
+                value={form.embedding_base_url}
+                onChange={set("embedding_base_url")}
+                className="text-xs font-mono h-8"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium">Modelo</label>
+              <Input
+                placeholder={eff.embedding_model}
+                value={form.embedding_model}
+                onChange={set("embedding_model")}
+                className="text-xs font-mono h-8"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium">Dimensões</label>
+              <Input
+                placeholder={eff.embedding_dimensions}
+                value={form.embedding_dimensions}
+                onChange={set("embedding_dimensions")}
+                className="text-xs font-mono h-8"
+                type="number"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium">API Key</label>
+              <div className="relative">
+                <Input
+                  type={showEmbedKey ? "text" : "password"}
+                  placeholder={eff.embedding_api_key_set ? eff.embedding_api_key_masked : "jina_... ou sk-..."}
+                  value={form.embedding_api_key}
+                  onChange={set("embedding_api_key")}
+                  className="text-xs font-mono h-8 pr-8"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowEmbedKey((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showEmbedKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Ações ─────────────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3">
+        <Button onClick={handleSave} disabled={saving} className="gap-2">
+          <Save className="h-4 w-4" />
+          {saving ? "Salvando..." : "Salvar configuração"}
+        </Button>
+        <Button variant="outline" onClick={handleTest} disabled={testing} className="gap-2">
+          <FlaskConical className="h-4 w-4" />
+          {testing ? "Testando..." : "Testar conexão"}
+        </Button>
+        {saveMsg && (
+          <span className={`text-sm ${saveMsg.startsWith("Erro") ? "text-red-500" : "text-green-600"}`}>
+            {saveMsg}
+          </span>
+        )}
+        {testResult && (
+          <span className={`text-sm flex items-center gap-1.5 ${testResult.ok ? "text-green-600" : "text-red-500"}`}>
+            {testResult.ok
+              ? <CheckCircle2 className="h-4 w-4" />
+              : <XCircle className="h-4 w-4" />}
+            {testResult.msg}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export function SettingsPanel() {
@@ -1250,6 +1674,11 @@ export function SettingsPanel() {
           <TabsTrigger value="config" className="gap-2">
             <Shield className="h-4 w-4" />
             Config
+          </TabsTrigger>
+          <TabsTrigger value="modelos" className="gap-2">
+            <BrainCircuit className="h-4 w-4" />
+            <span className="hidden sm:inline">Modelos IA</span>
+            <span className="sm:hidden">IA</span>
           </TabsTrigger>
         </TabsList>
 
@@ -1320,6 +1749,20 @@ export function SettingsPanel() {
               </CardHeader>
               <CardContent>
                 <ConfiguracaoSection />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="modelos">
+            <Card>
+              <CardHeader>
+                <CardTitle>Modelos de IA</CardTitle>
+                <CardDescription>
+                  Configure LLM e embedding. DB tem precedência sobre env vars — sem restart.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ModelosIASection />
               </CardContent>
             </Card>
           </TabsContent>

@@ -19,6 +19,7 @@ export type AugeModule =
   | "financeiro"
   | "compras"
   | "hardware"
+  | "impressora_elgin"
   | "banco_dados"
   | "instalacao"
   | "tributacao"
@@ -43,6 +44,13 @@ export const KEYWORD_MODULE_MAP: Record<string, AugeModule[]> = {
   xml: ["fiscal", "nfe"],
   rejeicao: ["fiscal", "nfe"],
   rejeição: ["fiscal", "nfe"],
+  // Erro 12007 / DNS SEFAZ
+  "12007": ["fiscal", "nfe"],
+  "nome do servidor": ["fiscal", "nfe"],
+  "sefaz fora": ["fiscal", "nfe"],
+  "nao pode ser resolvido": ["fiscal", "nfe"],
+  "erro http 0": ["fiscal", "nfe"],
+  "erro interno 12007": ["fiscal", "nfe"],
   danfe: ["fiscal", "nfe", "vendas_retaguarda"],
   cfop: ["fiscal", "tributacao"],
   cst: ["fiscal", "tributacao"],
@@ -326,6 +334,24 @@ export const KEYWORD_MODULE_MAP: Record<string, AugeModule[]> = {
   dispositivo: ["hardware"],
   "porta com": ["hardware", "balanca"],
 
+  // Impressora Elgin i9 / i8 / i7
+  elgin: ["impressora_elgin", "hardware"],
+  "elgin i9": ["impressora_elgin"],
+  "elgin i8": ["impressora_elgin"],
+  "elgin i7": ["impressora_elgin"],
+  "utility elgin": ["impressora_elgin"],
+  "impressora elgin": ["impressora_elgin"],
+  "impressora termica": ["impressora_elgin", "hardware"],
+  "termica elgin": ["impressora_elgin"],
+  "nao detecta impressora": ["impressora_elgin", "hardware"],
+  "não detecta impressora": ["impressora_elgin", "hardware"],
+  "impressora nao aparece": ["impressora_elgin", "hardware"],
+  "impressora não aparece": ["impressora_elgin", "hardware"],
+  "instalar elgin": ["impressora_elgin"],
+  "driver elgin": ["impressora_elgin"],
+  "utility i9": ["impressora_elgin"],
+  "utility i8": ["impressora_elgin"],
+
   // Banco de dados
   banco: ["banco_dados"],
   backup: ["banco_dados"],
@@ -553,6 +579,23 @@ Rejeições frequentes e causa raiz:
 Carta de Correção (CC-e): apenas para campos não determinantes do valor; máximo 20 cartas por NF-e.
 NF de entrada (compra): conferir CFOP de entrada, natureza de operação e tributação do fornecedor.
 Inutilização: para numerações não usadas; não inutilizar sequências que terão nota cancelada.
+
+ERRO 12007 — "O nome do servidor não pode ser resolvido" (CAUSA MAIS COMUM DE "SEFAZ FORA DO AR"):
+Erro Interno: 12007 / Erro HTTP: 0 / Mensagem: "O nome do servidor não pode ser resolvido"
+URL típica: https://nfe.sefaz.[estado].gov.br/nfe/services/NFeAutorizacao4?wsdl
+CAUSA REAL: NÃO é a SEFAZ offline. É falha de resolução de DNS no computador ou rede local.
+O Windows não consegue converter o nome do servidor SEFAZ em endereço IP.
+Diagnóstico rápido (CMD): ping nfe.sefaz.go.gov.br
+  → "Não foi possível resolver" = DNS com falha (causa confirmada)
+  → Responde com IP = DNS ok, problema está em outro lugar
+Solução:
+  1. Trocar DNS da placa de rede para 8.8.8.8 / 8.8.4.4 (Google) ou 1.1.1.1 (Cloudflare)
+  2. Reiniciar o roteador e aguardar 2 minutos
+  3. Conferir data e hora do computador (certificado digital rejeita se errada)
+  4. Testar abrir https://nfe.sefaz.go.gov.br no navegador — se não abrir, confirma DNS
+  5. Se todas as máquinas falham: problema no provedor (ISP) — contatar a operadora
+Atenção: clientes e atendentes frequentemente dizem "SEFAZ está fora do ar" para este erro.
+Sempre pedir o código/mensagem exata antes de concluir que é a SEFAZ.
 
 CASO REAL — REJEIÇÃO "AUSÊNCIA DE TROCO QUANDO O VALOR DOS PAGAMENTOS INFORMADOS FOR MAIOR QUE O TOTAL DA NOTA":
 Causa: a NF-e (modelo 55) exige que, se a soma dos meios de pagamento informados for maior que o valor total da nota, a diferença seja declarada explicitamente como troco no XML (tag <vTroco>). Quando isso não é preenchido, a SEFAZ rejeita.
@@ -871,6 +914,72 @@ Sintoma: produto não aparece na Tabela de Preços (F9)
   *201 → ENTRADA (compra de fornecedor)
   *103 → SAÍDA / VENDA (retaguarda)
   Outros perfis: consultar via INSERT → "Consulta Movimentação" para ver lista completa.`,
+
+  impressora_elgin: `IMPRESSORA ELGIN i9 (também vale para i7 e i8) — INSTALAÇÃO E CONFIGURAÇÃO NO AUGE ERP
+Conexão: USB (procedimento abaixo). Sem configuração de porta COM, IP ou rede neste modelo padrão.
+Tempo estimado: 15 a 30 minutos. Requer administrador Windows e acesso à internet.
+
+━━━ INSTALAÇÃO PASSO A PASSO ━━━
+
+ETAPA 1 — Baixar o Utilitário
+1. Abra o navegador e pesquise no Google: utility elgin i9
+2. Localize o arquivo "Software Utility Elgin i7, i8 e i9"
+3. Faça o download e aguarde concluir
+
+ETAPA 2 — Extrair e Instalar
+1. Abra a pasta Downloads → localize o arquivo .zip baixado
+2. Botão direito → Extrair Tudo → Extrair
+3. Dentro da pasta extraída, localize Setup.exe ou Install.exe
+4. Botão direito → Executar como administrador → Sim
+5. Clique Avançar/Next até Concluir
+
+ETAPA 3 — Conectar a Impressora
+1. Verifique se a impressora está ligada (LED de energia aceso)
+2. Conecte o cabo USB ao computador
+3. Aguarde alguns segundos — Windows reconhece automaticamente
+
+ETAPA 4 — Testar no Utilitário Elgin
+1. Iniciar → pesquisar "Utility" ou "Elgin" → abrir o programa
+2. Na lista de impressoras deve aparecer: ELGIN i9 | USB | Auto
+3. Selecione a impressora → clique Teste/Test
+4. Resultado esperado: impressora responde normalmente
+
+ETAPA 5 — Confirmar no Windows
+1. Iniciar → Configurações → Bluetooth e Dispositivos → Impressoras e Scanners
+2. Deve aparecer "ELGIN i9" com status: Ocioso ou Pronta
+3. Esse status confirma que a instalação foi concluída com sucesso
+
+ETAPA 6 — Configurar no Auge ERP
+1. Abra o Auge ERP e faça login
+2. Menu: Sistema → Painel de Controle → Parâmetros
+3. Localize a seção de impressão → selecione a impressora ELGIN i9
+4. Salve as alterações
+5. Faça um teste de impressão (cupom de teste ou relatório)
+6. Resultado esperado: impressão sai normalmente pela Elgin i9
+
+━━━ SOLUÇÃO DE PROBLEMAS ━━━
+
+Impressora não aparece no Windows:
+→ Verifique: cabo USB conectado, impressora ligada, driver instalado corretamente
+→ Tente outra porta USB do computador
+→ Reinstale o driver (Setup.exe como administrador)
+
+Impressora aparece mas não imprime:
+→ Confirme que está selecionada corretamente no Auge ERP (Sistema → Painel de Controle → Parâmetros)
+→ Verifique se o status em Impressoras e Scanners é "Pronta" ou "Ociosa"
+→ Reinicie o computador e tente novamente
+
+Utilitário não encontra a impressora:
+→ Verifique o cabo USB e se a impressora aparece em Impressoras e Scanners do Windows
+→ Confirme que o driver foi instalado (deve aparecer no Gerenciador de Dispositivos sem "!" amarelo)
+→ Reinstale o utilitário se necessário
+
+━━━ CHECKLIST RESULTADO FINAL ━━━
+✅ Driver instalado | ✅ Utilitário Elgin instalado
+✅ Impressora reconhecida pelo Windows (status: Pronta/Ociosa)
+✅ Comunicação testada no utilitário
+✅ Impressora configurada no Auge ERP (Sistema → Painel de Controle → Parâmetros)
+✅ Impressão funcionando normalmente`,
 
   hardware: `HARDWARE / PERIFÉRICOS — AUGE ERP
 Impressora de cupom/etiqueta — CONFIGURAÇÃO PASSO A PASSO:
@@ -1378,6 +1487,7 @@ export function nomearModulo(modulo: AugeModule): string {
     financeiro: "Financeiro",
     compras: "Compras",
     hardware: "Hardware/Periféricos",
+    impressora_elgin: "Impressora Elgin i9/i8/i7",
     banco_dados: "Banco de Dados",
     instalacao: "Instalação/Atualização",
     tributacao: "Tributação",
