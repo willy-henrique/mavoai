@@ -1,4 +1,17 @@
-interface EnviarRespostaWillTalkInput {
+import { logger } from "@/lib/logger"
+
+// ─── Modo direto (igual ao MTalk) ─────────────────────────────────────────────
+// Se WILLTALK_API_URL + WILLTALK_API_TOKEN estiverem configurados,
+// envia a resposta direto para a API WillTalk via número de telefone.
+// Fallback: envia para WILLTALK_REPLY_WEBHOOK_URL (legado).
+
+interface WillTalkDirectInput {
+  number: string   // telefone, ex: "5511999999999"
+  content: string
+  saveOnTicket?: boolean
+}
+
+interface WillTalkWebhookInput {
   ticketId: string
   cliente: string
   canal: string
@@ -6,13 +19,53 @@ interface EnviarRespostaWillTalkInput {
 }
 
 export async function enviarRespostaParaWillTalk(
-  input: EnviarRespostaWillTalkInput
+  input: WillTalkWebhookInput & { number?: string },
 ): Promise<void> {
-  const replyUrl = process.env.WILLTALK_REPLY_WEBHOOK_URL
+  const apiUrl   = process.env.WILLTALK_API_URL
+  const apiToken = process.env.WILLTALK_API_TOKEN
+
+  // Modo direto — mesmo padrão do MTalk
+  if (apiUrl && apiToken && input.number) {
+    return _enviarDireto({ number: input.number, content: input.resposta, saveOnTicket: true })
+  }
+
+  // Fallback: webhook legado
+  return _enviarWebhook(input)
+}
+
+async function _enviarDireto(input: WillTalkDirectInput): Promise<void> {
+  const apiUrl   = process.env.WILLTALK_API_URL!
+  const apiToken = process.env.WILLTALK_API_TOKEN!
+  const endpoint = `${apiUrl.replace(/\/$/, "")}/backend/api/messages/send`
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiToken}`,
+    },
+    body: JSON.stringify({
+      number: input.number,
+      body: input.content,
+      saveOnTicket: input.saveOnTicket ?? true,
+    }),
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    throw new Error(`WillTalk API error ${response.status}: ${body.slice(0, 300)}`)
+  }
+
+  logger.info("willtalk_reply_direto", { number: input.number })
+}
+
+async function _enviarWebhook(input: WillTalkWebhookInput): Promise<void> {
+  const replyUrl   = process.env.WILLTALK_REPLY_WEBHOOK_URL
   const replyToken = process.env.WILLTALK_WEBHOOK_TOKEN
 
   if (!replyUrl) {
-    throw new Error("WILLTALK_REPLY_WEBHOOK_URL nao configurada")
+    logger.warn("willtalk_reply_sem_url", { ticketId: input.ticketId })
+    return
   }
 
   const response = await fetch(replyUrl, {
@@ -22,23 +75,30 @@ export async function enviarRespostaParaWillTalk(
       ...(replyToken ? { Authorization: `Bearer ${replyToken}` } : {}),
     },
     body: JSON.stringify({
-      ticket_id: input.ticketId,
-      cliente: input.cliente,
-      canal: input.canal,
+      ticket_id:        input.ticketId,
+      cliente:          input.cliente,
+      canal:            input.canal,
       resposta_sugerida: input.resposta,
-      origem: "cerebro-operacional",
-      data_evento: new Date().toISOString(),
+      origem:           "cerebro-operacional",
+      data_evento:      new Date().toISOString(),
     }),
   })
 
   if (!response.ok) {
     const errorBody = await response.text()
-    throw new Error(
-      `Falha ao enviar resposta ao WillTalk: ${response.status} ${errorBody}`
-    )
+    throw new Error(`WillTalk webhook error ${response.status}: ${errorBody.slice(0, 300)}`)
   }
+
+  logger.info("willtalk_reply_webhook", { ticketId: input.ticketId })
 }
 
 export function autoReplyHabilitado(): boolean {
-  return process.env.WILLTALK_AUTO_REPLY_ENABLED === "true"
+  // Habilitado se: flag explícita true, OU API direta configurada, OU webhook configurado
+  if (process.env.WILLTALK_AUTO_REPLY_ENABLED === "true") return true
+  if (process.env.WILLTALK_API_URL && process.env.WILLTALK_API_TOKEN) return true
+  return false
+}
+
+export function willtalkReplyHabilitado(): boolean {
+  return autoReplyHabilitado()
 }

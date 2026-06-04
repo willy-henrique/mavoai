@@ -42,6 +42,10 @@ interface PayloadWillTalk {
   resumo_triagem?: string
   campos_faltantes?: string[]
   metadados_json?: Record<string, unknown>
+  // Número de telefone do contato — igual ao MTalk
+  number?: string
+  phone?: string
+  contact?: { number?: string; phone?: string; phone_number?: string }
   metadata?: {
     sourceSystem?: string
     sourceEntityId?: string
@@ -55,6 +59,8 @@ interface PayloadWillTalk {
     confidence?: number | string
     resumo_triagem?: string
     campos_faltantes?: unknown
+    number?: string
+    phone?: string
   }
 }
 
@@ -64,6 +70,20 @@ function resolveClienteNome(cliente: PayloadWillTalk["cliente"]) {
     return String(cliente.nome || cliente.name || "").trim()
   }
   return ""
+}
+
+function extractContactNumber(payload: PayloadWillTalk): string | undefined {
+  const raw =
+    payload.contact?.number ??
+    payload.contact?.phone ??
+    payload.contact?.phone_number ??
+    payload.number ??
+    payload.phone ??
+    payload.metadata?.number ??
+    payload.metadata?.phone
+  if (!raw) return undefined
+  const digits = String(raw).replace(/[^0-9]/g, "")
+  return digits.length >= 8 ? digits : undefined
 }
 
 function buildRichConversationText(payload: PayloadWillTalk, ticketId: string, mensagens: string) {
@@ -296,7 +316,7 @@ export async function POST(request: Request) {
     })
 
     // Dispara processamento IA após retornar a resposta (Next.js 15 after()).
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || new URL(request.url).origin
+    const baseUrl = process.env.INTERNAL_BASE_URL || new URL(request.url).origin
     after(async () => {
       try {
         await fetch(`${baseUrl}/api/atendimentos/processar`, {
@@ -320,55 +340,73 @@ export async function POST(request: Request) {
       }
     })
 
-    if (autoReplyHabilitado() && (body.canal || "whatsapp") === "whatsapp") {
-      const textoConsulta = mensagens
+    // Auto-reply — igual ao MTalk: gera IA, envia (direto ou webhook), retorna no HTTP
+    const contactNumber = extractContactNumber(body)
+
+    if (autoReplyHabilitado()) {
       const AUTO_REPLY_TIMEOUT_MS = 30_000
+      const ac = new AbortController()
+      const timer = setTimeout(() => ac.abort(), AUTO_REPLY_TIMEOUT_MS)
 
-      Promise.resolve()
-        .then(async () => {
-          const ac = new AbortController()
-          const timer = setTimeout(() => ac.abort(), AUTO_REPLY_TIMEOUT_MS)
+      let resposta: string | null = null
 
-          try {
-            const resposta = await Promise.race([
-              gerarRespostaAssistida(textoConsulta),
-              new Promise<never>((_, reject) => {
-                ac.signal.addEventListener("abort", () =>
-                  reject(new Error("auto-reply timeout"))
-                )
-              }),
-            ])
+      try {
+        resposta = await Promise.race([
+          gerarRespostaAssistida(mensagens),
+          new Promise<never>((_, reject) => {
+            ac.signal.addEventListener("abort", () =>
+              reject(new Error("auto-reply timeout"))
+            )
+          }),
+        ])
+        clearTimeout(timer)
 
-            await enviarRespostaParaWillTalk({
-              ticketId,
-              cliente,
-              canal: body.canal || "whatsapp",
-              resposta,
-            })
-            await registrarLogIngestao("auto_reply_enviado", body, {
-              ticket_id: ticketId,
-              source_system: sourceSystem,
-            }, sourceSystem)
-          } finally {
-            clearTimeout(timer)
-          }
-        })
-        .catch(async (err) => {
-          const msg = err instanceof Error ? err.message : String(err)
-          const is429 = msg.includes("429") || msg.includes("rate_limit")
-          const isTimeout = msg.includes("timeout")
-          logger.warn("auto_reply_skip", {
-            ticketId,
-            motivo: is429 ? "rate_limit_ia" : isTimeout ? "timeout" : "erro",
-            error: msg.slice(0, 200),
-          })
-          await registrarLogIngestao("auto_reply_erro", body, {
+        // Envia resposta (API direta se number disponível, senão webhook)
+        enviarRespostaParaWillTalk({
+          ticketId,
+          cliente,
+          canal: body.canal || "whatsapp",
+          resposta,
+          number: contactNumber,
+        }).then(() => {
+          registrarLogIngestao("auto_reply_enviado", body, {
             ticket_id: ticketId,
-            motivo: msg.slice(0, 400),
-            skipped: true,
             source_system: sourceSystem,
+            via: contactNumber ? "api_direta" : "webhook",
           }, sourceSystem).catch(() => {})
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err)
+          logger.warn("auto_reply_envio_erro", { ticketId, error: msg.slice(0, 200) })
         })
+
+      } catch (err) {
+        clearTimeout(timer)
+        const msg = err instanceof Error ? err.message : String(err)
+        const is429 = msg.includes("429") || msg.includes("rate_limit")
+        const isTimeout = msg.includes("timeout")
+        logger.warn("auto_reply_skip", {
+          ticketId,
+          motivo: is429 ? "rate_limit_ia" : isTimeout ? "timeout" : "erro",
+          error: msg.slice(0, 200),
+        })
+        await registrarLogIngestao("auto_reply_erro", body, {
+          ticket_id: ticketId,
+          motivo: msg.slice(0, 400),
+          skipped: true,
+          source_system: sourceSystem,
+        }, sourceSystem).catch(() => {})
+      }
+
+      // Retorna a resposta no HTTP — igual ao MTalk
+      if (resposta) {
+        return NextResponse.json({
+          status: "ok",
+          atendimento_id: atendimentoId,
+          messages: [{ type: "text", text: resposta }],
+          text: resposta,
+          message: resposta,
+        })
+      }
     }
 
     return NextResponse.json({

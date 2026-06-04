@@ -1,6 +1,10 @@
 import { buildAgentHandoffSummary } from "@/lib/handoff-agent-summary"
 import { analyzeImageForSupport } from "@/lib/image-vision"
-import { evaluateInvestigationTurn } from "@/lib/investigation-quality"
+import {
+  evaluateInvestigationTurn,
+  gerarRespostaConversacional,
+  gerarPrimerInvestigacao,
+} from "@/lib/investigation-quality"
 import { gerarTextoIA } from "@/lib/ai-provider"
 import { isLikelyImagePayload } from "@/lib/vision-utils"
 import {
@@ -9,11 +13,15 @@ import {
   buildResolutionSuccessReply,
   buildResolutionExhaustedReply,
   buildResolutionUnclearReply,
-  MAX_AI_RESOLUTION_ATTEMPTS,
+  getResolutionParams,
+  isInsufficientContext,
 } from "@/lib/resolution-engine"
+import { isEscalationSignal } from "@/lib/escalation-detector"
+import { getAgentParams } from "@/lib/agent-config"
 import { listActiveOrgs, loadOrgConfig, type OrgConfig } from "@/lib/org-loader"
 
-// ─── Constantes de controle ────────────────────────────────────────────────────
+// ─── Constantes de controle (fallback estático) ────────────────────────────────
+// Os valores reais são carregados em runtime via getOrchestratorParams().
 
 /** Rodadas de evidência adequada necessárias antes de tentar resolver. */
 export const INVESTIGATION_REQUIRED_ADEQUATE_ROUNDS = 1
@@ -26,6 +34,11 @@ export const INVESTIGATION_MAX_INBOUND_WITHOUT_HANDOFF = 14
 
 /** Tentativas inválidas no menu antes do handoff humano. */
 export const MENU_MAX_INVALID_ATTEMPTS = 3
+
+/** Carrega parâmetros configuráveis do orquestrador para o tenant. */
+async function getOrchestratorParams(tenantId = "default") {
+  return getAgentParams("orchestrator", tenantId)
+}
 
 // ─── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -116,7 +129,7 @@ export type PlatformOrchestratorOutput = {
 }
 
 type InvestigationEvalResult = {
-  nivel: "adequado" | "insuficiente" | "fora_do_tema"
+  nivel: "adequado" | "insuficiente" | "fora_do_tema" | "topico_alterado"
   motivoCurto: string
   textoResposta: string
 }
@@ -140,7 +153,7 @@ function isTechnicalQuery(text: string): boolean {
     .replace(/\p{Diacritic}/gu, "")
   const signals = [
     "erro", "error", "problema", "falha", "nao funciona", "não funciona",
-    "imprimindo", "imprime", "auge", "erp", "nota", "nfe", "nfce", "fiscal",
+    "imprimindo", "imprime", "auge", "erp", "nota", "nfe", "nf-e", "nfce", "nfc-e", "fiscal",
     "sistema", "tela", "modulo", "rotina", "banco", "caixa", "venda",
     "impressora", "balanca", "leitor", "scanner", "tef", "pix", "boleto",
     "certificado", "sefaz", "xml", "produto", "estoque", "travou", "lento",
@@ -152,6 +165,29 @@ function isTechnicalQuery(text: string): boolean {
     "como faco", "como faço", "passo a passo", "tutorial", "procedimento",
     "sped", "speed", "efd", "ecf", "apuracao", "apuração", "livro fiscal",
     "registro de entradas", "registro de saidas", "registro de saídas",
+    // fiscal ERP
+    "rejeicao", "rejeitada", "rejeicoes", "ncm", "cfop", "cst", "csosn", "danfe",
+    "danf-e", "carta de correcao", "cce", "contingencia", "sat fiscal",
+    "nf entrada", "nf de entrada", "nota de entrada", "nota fiscal",
+    "pis", "cofins", "icms", "ipi", "iss", "ie inscricao", "inscricao estadual",
+    // tef / pagamentos
+    "pinpad", "pin pad", "sitef", "clisitef", "cartao", "cartão", "adquirente",
+    "cielo", "stone", "rede", "getnet", "voucher", "vale refeicao", "vale-refeicao",
+    "transacao", "transação", "estorno", "cancelamento", "maquininha",
+    // pdv / caixa
+    "pdv", "ponto de venda", "cupom", "codigo de barras", "ean", "barras",
+    "fechamento de caixa", "sangria", "suprimento", "crediario", "crediário",
+    // estoque / compras
+    "custo medio", "custo médio", "inventario", "inventário", "ressuprimento",
+    "transferencia de estoque", "grade de produto", "variacao", "variação",
+    "codigo de barras duplicado", "ean duplicado",
+    // hardware
+    "sat", "nobreak", "ups", "gaveta", "guilhotina", "touchscreen", "monitor touch",
+    "etiqueta", "argox", "zebra", "cmos", "bios",
+    // integração
+    "concentrador", "sincronizacao", "sincronização", "webhook", "api",
+    "marketplace", "certificado a3", "mdf-e", "mdfe", "ct-e", "cte",
+    "replicacao", "replicação", "slot de replicacao",
   ]
   return signals.some((s) => t.includes(s))
 }
@@ -462,6 +498,40 @@ function buildTriageNoQueues(): string {
   )
 }
 
+/**
+ * Detecta quando o cliente está mudando de assunto explicitamente.
+ * Ex: "na verdade é um erro no concentrador", "errei, é sobre TEF"
+ */
+function detectsTopicChange(text: string): boolean {
+  const t = normalizeTextLower(text).normalize("NFD").replace(/\p{Diacritic}/gu, "")
+  const patterns = [
+    "na verdade", "mas na verdade", "na real",
+    "era outro", "e outro", "outro problema",
+    "me enganei", "me equivoquei", "errei",
+    "esquece", "esquece isso", "esquece a",
+    "nao era isso", "nao e isso", "nao e esse",
+    "o problema e no", "o erro e no", "e sobre",
+    "mudou o problema", "e no concentrador", "e no tef",
+    "e no fiscal", "e no pdv", "e no estoque",
+    "e no sistema", "e em outro", "e em outro modulo",
+  ]
+  return patterns.some((p) => t.includes(p))
+}
+
+/**
+ * Remove conteúdo citado/copiado de mensagens do WhatsApp.
+ * Mensagens citadas aparecem após "> " ou são textos copiados que começam com identificador de outra pessoa.
+ */
+function stripForwardedContent(text: string): string {
+  if (!text) return text
+  const lines = text.split("\n")
+  // Remove linhas que começam com ">" (citação WhatsApp)
+  const filtered = lines.filter((l) => !l.trim().startsWith(">"))
+  const result = filtered.join("\n").trim()
+  // Se removeu mais de 60% do texto, provavelmente era mensagem copiada completa — usa original
+  return result.length > text.length * 0.4 ? result : text
+}
+
 /** Detecta quando o cliente está frustrado com a resposta da IA ou pedindo mais informação. */
 function isClientFrustrated(inputText: string): boolean {
   const t = normalizeTextLower(inputText).normalize("NFD").replace(/\p{Diacritic}/gu, "")
@@ -746,6 +816,9 @@ async function tryFastPath(params: {
     return null // IA indisponível — cai para investigação normal
   }
 
+  // Sem contexto suficiente → não arrisca alucinação, cai para investigação
+  if (isInsufficientContext(primeiraSolucao)) return null
+
   return buildOutput({
     reply_text: primeiraSolucao + suffix,
     triage_completed: false,
@@ -770,9 +843,25 @@ async function tryFastPath(params: {
 export async function runPlatformOrchestrator(
   input: PlatformOrchestratorInput,
 ): Promise<PlatformOrchestratorOutput> {
+  // Carrega parâmetros configuráveis (banco ou defaults) — fail-safe
+  const tenantForConfig = input.organization_id ?? "default"
+  const [orchParams, resolutionParams] = await Promise.all([
+    getOrchestratorParams(tenantForConfig),
+    getResolutionParams(tenantForConfig),
+  ])
+
+  // Usa parâmetros configuráveis (sobrescrevem as constantes estáticas)
+  const CFG_FAST_PATH_MIN_CHARS           = orchParams.fast_path_min_chars
+  const CFG_INVEST_REQUIRED_ROUNDS        = orchParams.investigation_required_adequate_rounds
+  const CFG_INVEST_MAX_INADEQUATE         = orchParams.investigation_max_inadequate_before_handoff
+  const CFG_INVEST_MAX_INBOUND            = orchParams.investigation_max_inbound_without_handoff
+  const CFG_MENU_MAX_INVALID              = orchParams.menu_max_invalid_attempts
+  const CFG_MAX_AI_RESOLUTION_ATTEMPTS    = resolutionParams.max_attempts
+
   const qlist = input.queues.filter((q) => q.is_active !== false)
   const suffix = buildOutOfHoursSuffix(input.business_hours_open)
-  const body = normalizeText(input.mensagem)
+  // Filtra conteúdo copiado/citado do WhatsApp antes de processar
+  const body = stripForwardedContent(normalizeText(input.mensagem))
   const mediaUrl = input.media_url || null
   const mimeType = input.mime_type || null
   const triageCompleted = Boolean(input.conversation.triage_completed)
@@ -902,7 +991,7 @@ export async function runPlatformOrchestrator(
   if (triageCompleted) {
     // Se o cliente faz uma nova pergunta técnica ou pede passo a passo após o handoff,
     // responde diretamente em vez de repetir o ACK de atendente.
-    if (queueId && (isDirectProcedureRequest(body) || (isTechnicalQuery(body) && body.length >= FAST_PATH_MIN_CHARS))) {
+    if (queueId && (isDirectProcedureRequest(body) || (isTechnicalQuery(body) && body.length >= CFG_FAST_PATH_MIN_CHARS))) {
       const currentQueue = qlist.find((q) => String(q.id) === queueId)
       if (currentQueue) {
         try {
@@ -914,6 +1003,8 @@ export async function runPlatformOrchestrator(
             tenantId: resolvedTenantId,
             orgConfig: resolvedOrgConfig,
           })
+          // Sem contexto → cai para ACK de atendente humano
+          if (isInsufficientContext(resposta)) throw new Error("insufficient_context")
           return buildOutput({
             reply_text: resposta + suffix,
             triage_completed: true,
@@ -1042,7 +1133,7 @@ export async function runPlatformOrchestrator(
         const nextAttempt = resolutionAttempts + 1
 
         // Esgotou as 3 tentativas → handoff
-        if (nextAttempt > MAX_AI_RESOLUTION_ATTEMPTS) {
+        if (nextAttempt > CFG_MAX_AI_RESOLUTION_ATTEMPTS) {
           const agent_handoff_summary = await buildAgentHandoffSummary({
             kind: "resolution_exhausted",
             queueName,
@@ -1077,6 +1168,34 @@ export async function runPlatformOrchestrator(
           tenantId: resolvedTenantId,
           orgConfig: resolvedOrgConfig,
         })
+
+        // Sem contexto suficiente → escala para humano em vez de alucinar
+        if (isInsufficientContext(novaSolucao)) {
+          const agent_handoff_summary = await buildAgentHandoffSummary({
+            kind: "resolution_exhausted",
+            queueName,
+            clienteNome: input.cliente.nome,
+            clienteTelefone: input.cliente.telefone,
+            lastUserMessage: body,
+            imageAnalysis: null,
+            resolutionAttempts: nextAttempt,
+            resolutionProblemText: resolutionProblemText || body,
+            resolutionPrevSolutions,
+          })
+          return buildOutput({
+            reply_text: buildResolutionExhaustedReply(queueName) + suffix,
+            triage_completed: true,
+            queue_id: queueId,
+            reason: "resolution_insufficient_context",
+            agent_handoff_summary,
+            menu_invalid_attempts: menuInvalidAttempts,
+            investigation_adequate_rounds: investigationAdequateRounds,
+            investigation_inadequate_streak: 0,
+            resolution_active: false,
+            resolution_attempts: nextAttempt,
+          })
+        }
+
         const novaPrevSolutions = JSON.stringify([...resolutionPrevSolutions, novaSolucao.slice(0, 300)])
 
         return buildOutput({
@@ -1096,7 +1215,7 @@ export async function runPlatformOrchestrator(
 
       // Resposta ambígua (unclear) → pede confirmação sem gastar tentativa
       return buildOutput({
-        reply_text: buildResolutionUnclearReply(resolutionAttempts, MAX_AI_RESOLUTION_ATTEMPTS) + suffix,
+        reply_text: buildResolutionUnclearReply(resolutionAttempts, CFG_MAX_AI_RESOLUTION_ATTEMPTS) + suffix,
         triage_completed: false,
         queue_id: queueId,
         reason: "resolution_awaiting_confirmation",
@@ -1170,11 +1289,52 @@ export async function runPlatformOrchestrator(
 
     // ── FASE DE INVESTIGAÇÃO ──────────────────────────────────────────────
 
+    // ── Detecção de troca de assunto ─────────────────────────────────────
+    // Funciona em QUALQUER fase da investigação (não só na primeira rodada)
+    if (detectsTopicChange(body)) {
+      const newChoice = inferQueueFromFreeText(qlist, body)
+      const newAiChoice = newChoice.queueId
+        ? null
+        : await inferQueueFromAI(qlist, body).catch(() => null)
+
+      const newQueueId = newChoice.queueId ?? newAiChoice?.queueId ?? null
+      const newQueue = newQueueId ? qlist.find((q) => String(q.id) === newQueueId) : null
+
+      if (newQueue && newQueue.id !== currentQueue?.id) {
+        // Troca de assunto confirmada para uma fila diferente
+        const primerMudanca = await gerarPrimerInvestigacao({ queueName: newQueue.name, mensagemOriginal: body, clienteNome: input.cliente.nome })
+        return buildOutput({
+          reply_text: primerMudanca + suffix,
+          triage_completed: false,
+          queue_id: String(newQueue.id),
+          reason: "topic_changed_retriage",
+          menu_invalid_attempts: menuInvalidAttempts,
+          investigation_adequate_rounds: 0,
+          investigation_inadequate_streak: 0,
+          resolution_problem_text: "",
+          ...persistedOrgState,
+        })
+      }
+
+      // Mesmo assunto mas o cliente está corrigindo o relato — reseta contadores
+      return buildOutput({
+        reply_text: `Entendido. Sobre o problema no *${queueName}* — me diz o que aparece na tela ou descreve o erro exato.`,
+        triage_completed: false,
+        queue_id: queueId,
+        reason: "topic_clarified",
+        menu_invalid_attempts: menuInvalidAttempts,
+        investigation_adequate_rounds: 0,
+        investigation_inadequate_streak: 0,
+        resolution_problem_text: body,
+        ...persistedOrgState,
+      })
+    }
+
     // Limite de mensagens sem evidência suficiente
     if (
       investigationMessagesSeen !== null &&
-      investigationMessagesSeen >= INVESTIGATION_MAX_INBOUND_WITHOUT_HANDOFF &&
-      investigationAdequateRounds < INVESTIGATION_REQUIRED_ADEQUATE_ROUNDS
+      investigationMessagesSeen >= CFG_INVEST_MAX_INBOUND &&
+      investigationAdequateRounds < CFG_INVEST_REQUIRED_ROUNDS
     ) {
       const agent_handoff_summary = await buildAgentHandoffSummary({
         kind: "investigation_exhausted_inbound",
@@ -1224,13 +1384,49 @@ export async function runPlatformOrchestrator(
       inadequateStreak: investigationInadequateStreak,
     })) as InvestigationEvalResult
 
+    // Troca de assunto detectada pelo avaliador LLM → re-triagem
+    if (evalResult.nivel === "topico_alterado") {
+      const newChoice = inferQueueFromFreeText(qlist, body)
+      const newAiChoice = newChoice.queueId
+        ? null
+        : await inferQueueFromAI(qlist, body).catch(() => null)
+      const newQueueId = newChoice.queueId ?? newAiChoice?.queueId ?? null
+      const newQueue = newQueueId ? qlist.find((q) => String(q.id) === newQueueId) : null
+
+      if (newQueue && String(newQueue.id) !== queueId) {
+        return buildOutput({
+          reply_text: buildInvestigationPrompt(newQueue.name) + suffix,
+          triage_completed: false,
+          queue_id: String(newQueue.id),
+          reason: "topic_changed_via_evaluator",
+          menu_invalid_attempts: menuInvalidAttempts,
+          investigation_adequate_rounds: 0,
+          investigation_inadequate_streak: 0,
+          resolution_problem_text: "",
+          ...persistedOrgState,
+        })
+      }
+      // Mesmo assunto mas cliente corrigiu — usa textoResposta do avaliador
+      return buildOutput({
+        reply_text: evalResult.textoResposta + suffix,
+        triage_completed: false,
+        queue_id: queueId,
+        reason: "topic_clarified_via_evaluator",
+        menu_invalid_attempts: menuInvalidAttempts,
+        investigation_adequate_rounds: 0,
+        investigation_inadequate_streak: 0,
+        resolution_problem_text: body,
+        ...persistedOrgState,
+      })
+    }
+
     // Evidência insuficiente / fora do tema
     if (evalResult.nivel !== "adequado") {
       const nextInadequateStreak = investigationInadequateStreak + 1
       const clientDifficulty = isClientReportingDifficulty(body)
       const clientFrustrated = isClientFrustrated(body)
 
-      if (clientDifficulty || clientFrustrated || nextInadequateStreak >= INVESTIGATION_MAX_INADEQUATE_BEFORE_HANDOFF) {
+      if (clientDifficulty || clientFrustrated || nextInadequateStreak >= CFG_INVEST_MAX_INADEQUATE) {
         const agent_handoff_summary = await buildAgentHandoffSummary({
           kind: "investigation_client_unclear",
           queueName,
@@ -1261,8 +1457,44 @@ export async function runPlatformOrchestrator(
         })
       }
 
+      const respostaInsuficiente = await gerarRespostaConversacional({
+        nivel: evalResult.nivel,
+        queueName,
+        userText: body,
+        imageAnalysis: vision,
+        previousContext: updatedProblemText,
+        lastAiQuestion: lastAiReply,
+        clienteNome: input.cliente.nome,
+        inadequateStreak: nextInadequateStreak - 1,
+        isClientFrustrated: false,
+        isClientDifficulty: false,
+      })
+
+      // IA declarou que não sabe → escala para humano imediatamente
+      if (isEscalationSignal(respostaInsuficiente)) {
+        const agent_handoff_summary = await buildAgentHandoffSummary({
+          kind: "investigation_client_unclear",
+          queueName,
+          clienteNome: input.cliente.nome,
+          clienteTelefone: input.cliente.telefone,
+          lastUserMessage: body,
+          imageAnalysis: vision,
+        })
+        return buildOutput({
+          reply_text: `Vou encaminhar seu atendimento de *${queueName}* para um técnico especializado agora.` + suffix,
+          triage_completed: true,
+          queue_id: queueId,
+          reason: "investigation_escalated_no_knowledge",
+          agent_handoff_summary,
+          menu_invalid_attempts: menuInvalidAttempts,
+          investigation_adequate_rounds: investigationAdequateRounds,
+          investigation_inadequate_streak: nextInadequateStreak,
+          resolution_active: false,
+        })
+      }
+
       return buildOutput({
-        reply_text: evalResult.textoResposta + suffix,
+        reply_text: respostaInsuficiente + suffix,
         triage_completed: false,
         queue_id: queueId,
         reason: evalResult.nivel === "fora_do_tema" ? "investigation_off_topic" : "investigation_insufficient_evidence",
@@ -1277,7 +1509,7 @@ export async function runPlatformOrchestrator(
     const nextAdequateRounds = investigationAdequateRounds + 1
 
     // Completou investigação → ENTRA NA FASE DE RESOLUÇÃO AUTÔNOMA
-    if (nextAdequateRounds >= INVESTIGATION_REQUIRED_ADEQUATE_ROUNDS) {
+    if (nextAdequateRounds >= CFG_INVEST_REQUIRED_ROUNDS) {
       const problemTextFinal = updatedProblemText || body
 
       const primeiraSolucao = await gerarSolucaoAutonoma({
@@ -1288,6 +1520,33 @@ export async function runPlatformOrchestrator(
         tenantId: resolvedTenantId,
         orgConfig: resolvedOrgConfig,
       })
+
+      // Sem contexto suficiente → escala para humano, não alucina
+      if (isInsufficientContext(primeiraSolucao)) {
+        const agent_handoff_summary = await buildAgentHandoffSummary({
+          kind: "resolution_exhausted",
+          queueName,
+          clienteNome: input.cliente.nome,
+          clienteTelefone: input.cliente.telefone,
+          lastUserMessage: body,
+          imageAnalysis: null,
+          resolutionAttempts: 1,
+          resolutionProblemText: problemTextFinal,
+          resolutionPrevSolutions: [],
+        })
+        return buildOutput({
+          reply_text: buildResolutionExhaustedReply(queueName) + suffix,
+          triage_completed: true,
+          queue_id: queueId,
+          reason: "resolution_insufficient_context",
+          agent_handoff_summary,
+          menu_invalid_attempts: menuInvalidAttempts,
+          investigation_adequate_rounds: nextAdequateRounds,
+          investigation_inadequate_streak: 0,
+          resolution_active: false,
+          resolution_attempts: 1,
+        })
+      }
 
       return buildOutput({
         reply_text: primeiraSolucao + suffix,
@@ -1304,13 +1563,45 @@ export async function runPlatformOrchestrator(
       })
     }
 
-    // Primeira rodada adequada — pede mais contexto para fortalecer a resolução
-    const reply = vision
-      ? `${vision}\n\n_Se puder, envie mais um detalhe objetivo, como a mensagem exata da tela, o nome da rotina ou outro print relacionado._`
-      : buildFollowUpAfterAdequate({ body, queueName, adequateRounds: investigationAdequateRounds })
+    // Primeira rodada adequada — pede mais contexto para completar o diagnóstico
+    const replyAdequado = await gerarRespostaConversacional({
+      nivel: "adequado",
+      queueName,
+      userText: body,
+      imageAnalysis: vision,
+      previousContext: updatedProblemText,
+      lastAiQuestion: lastAiReply,
+      clienteNome: input.cliente.nome,
+      inadequateStreak: 0,
+      isClientFrustrated: false,
+      isClientDifficulty: false,
+    })
+
+    // IA declarou que não sabe → escala em vez de inventar
+    if (isEscalationSignal(replyAdequado)) {
+      const agent_handoff_summary = await buildAgentHandoffSummary({
+        kind: "investigation_client_unclear",
+        queueName,
+        clienteNome: input.cliente.nome,
+        clienteTelefone: input.cliente.telefone,
+        lastUserMessage: body,
+        imageAnalysis: vision,
+      })
+      return buildOutput({
+        reply_text: `Vou encaminhar seu atendimento de *${queueName}* para um técnico especializado agora.` + suffix,
+        triage_completed: true,
+        queue_id: queueId,
+        reason: "investigation_escalated_no_knowledge",
+        agent_handoff_summary,
+        menu_invalid_attempts: menuInvalidAttempts,
+        investigation_adequate_rounds: nextAdequateRounds,
+        investigation_inadequate_streak: 0,
+        resolution_active: false,
+      })
+    }
 
     return buildOutput({
-      reply_text: reply + suffix,
+      reply_text: replyAdequado + suffix,
       triage_completed: false,
       queue_id: queueId,
       reason: "investigation_round",
@@ -1347,8 +1638,13 @@ export async function runPlatformOrchestrator(
   const selected = Number.parseInt(body, 10)
   const queue = qlist.find((q) => Number(q.menu_option) === selected)
   if (Number.isInteger(selected) && queue) {
+    const primer = await gerarPrimerInvestigacao({
+      queueName: queue.name,
+      mensagemOriginal: body,
+      clienteNome: input.cliente.nome,
+    })
     return buildOutput({
-      reply_text: buildInvestigationPrompt(queue.name) + suffix,
+      reply_text: primer + suffix,
       triage_completed: false,
       queue_id: String(queue.id),
       reason: "queue_selected",
@@ -1373,8 +1669,13 @@ export async function runPlatformOrchestrator(
         orgConfig: resolvedOrgConfig,
       })
       if (fastPath) return fastPath
+      const primer = await gerarPrimerInvestigacao({
+        queueName: autoQueue.name,
+        mensagemOriginal: body,
+        clienteNome: input.cliente.nome,
+      })
       return buildOutput({
-        reply_text: buildInvestigationPrompt(autoQueue.name) + suffix,
+        reply_text: primer + suffix,
         triage_completed: false,
         queue_id: String(autoQueue.id),
         reason: "queue_auto_classified",
@@ -1399,8 +1700,13 @@ export async function runPlatformOrchestrator(
         orgConfig: resolvedOrgConfig,
       })
       if (fastPath) return fastPath
+      const primer = await gerarPrimerInvestigacao({
+        queueName: aiQueue.name,
+        mensagemOriginal: body,
+        clienteNome: input.cliente.nome,
+      })
       return buildOutput({
-        reply_text: buildInvestigationPrompt(aiQueue.name) + suffix,
+        reply_text: primer + suffix,
         triage_completed: false,
         queue_id: String(aiQueue.id),
         reason: "queue_auto_classified_ai",

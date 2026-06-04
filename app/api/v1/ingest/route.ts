@@ -45,7 +45,7 @@ export async function POST(request: Request) {
 
   // Delega para o endpoint interno /api/knowledge/text, injetando o tenant da API Key
   try {
-    const internalUrl = `${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/knowledge/text`
+    const internalUrl = `${process.env.INTERNAL_BASE_URL || "http://localhost:3000"}/api/knowledge/text`
     const resp = await fetch(internalUrl, {
       method : "POST",
       headers: { "Content-Type": "application/json" },
