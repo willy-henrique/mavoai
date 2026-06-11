@@ -65,9 +65,11 @@ export async function POST(request: Request) {
 
     let vector: string | null = null
     try {
-      const textoEmbedding = [parsed.problema, texto_original, parsed.solucao]
+      // Limita o texto para evitar embeddings muito grandes
+      const textoEmbedding = [parsed.problema, parsed.solucao, texto_original]
         .filter(Boolean)
         .join("\n")
+        .slice(0, 2000)
       const embedding = await gerarEmbedding(textoEmbedding)
       vector = embeddingParaVector(embedding)
     } catch (embeddingError) {
@@ -98,7 +100,7 @@ export async function POST(request: Request) {
         parsed.solucao,
         parsed.categoria,
         categorias.rows[0]?.id || null,
-        vector ? Buffer.from(vector, "utf8") : null,
+        vector,
         id,
       ]
     )

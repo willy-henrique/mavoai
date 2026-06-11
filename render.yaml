@@ -1,0 +1,91 @@
+services:
+  - type: web
+    name: mavoai-cerebro
+    runtime: node
+    plan: free
+    region: ohio
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "20"
+
+      # URL pública — Render fornece automaticamente (preencher após primeiro deploy)
+      - key: NEXT_PUBLIC_BASE_URL
+        value: https://mavoai-cerebro.onrender.com
+      - key: INTERNAL_BASE_URL
+        value: http://localhost:3000
+
+      # Banco — Supabase (preencher com a connection string do Supabase)
+      # Supabase → Settings → Database → URI
+      - key: DATABASE_URL
+        sync: false
+
+      # IA — Groq
+      - key: AI_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: AI_CHAT_MODEL
+        value: meta-llama/llama-4-scout-17b-16e-instruct
+      - key: AI_CURATOR_MODEL
+        value: meta-llama/llama-4-maverick-17b-128e-instruct
+      - key: AI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+
+      # Embeddings — Jina AI
+      - key: EMBEDDING_BASE_URL
+        value: https://api.jina.ai/v1
+      - key: AI_EMBEDDING_MODEL
+        value: jina-embeddings-v5-text-small
+      - key: AI_EMBEDDING_DIMENSIONS
+        value: "1024"
+      - key: AI_EMBEDDING_TASK
+        value: retrieval.passage
+      - key: EMBEDDING_API_KEY
+        sync: false
+
+      # Supabase Auth
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        value: https://wakvnakntdynfkevqlxh.supabase.co
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+      # MTalk
+      - key: MTALK_BASE_URL
+        value: https://s11.mtalk.com.br
+      - key: MTALK_AUTO_REPLY_ENABLED
+        value: "true"
+      - key: MTALK_ACCOUNT_ID
+        value: "1"
+      - key: MTALK_API_TOKEN
+        sync: false
+      - key: MTALK_ADMIN_EMAIL
+        sync: false
+      - key: MTALK_ADMIN_PASS
+        sync: false
+
+      # Segurança
+      - key: CEREBRO_INGEST_TOKEN
+        sync: false
+      - key: CEREBRO_INTERNAL_TOKEN
+        sync: false
+      - key: INTEGRATION_AUTH_REQUIRED
+        value: "true"
+      - key: API_RATE_LIMIT_PER_MINUTE
+        value: "60"
+
+      # Outros
+      - key: ENABLE_AI_ROUTER
+        value: "true"
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: WILLTALK_AUTO_REPLY_ENABLED
+        value: "false"

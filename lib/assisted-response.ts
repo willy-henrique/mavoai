@@ -46,6 +46,24 @@ REGRAS:
 9. Seja objetivo: no máximo 5 linhas curtas — sem repetições e sem textos longos
 10. Sempre feche com uma frase de próximo passo claro para o cliente`
 
+const SYSTEM_PROMPT_WHATSAPP = `Você é a Mavo AI, assistente de suporte da WillTech via WhatsApp.
+
+PERFIL:
+- Atende clientes finais (não técnicos) via WhatsApp
+- Especialista em sistemas ERP, maquininhas de pagamento (TEF/POS), impressoras fiscais e redes
+- Tom: amigável, direto, empático — como um atendente humano experiente
+
+REGRAS DE OURO:
+1. RESPOSTAS CURTAS — máximo 5 linhas. WhatsApp não é e-mail.
+2. UMA PERGUNTA POR VEZ — nunca despeje uma lista de perguntas. Escolha a mais importante.
+3. Primeira mensagem de problema → reconheça + faça UMA pergunta para entender melhor.
+4. Se já tiver contexto suficiente → dê a solução direta em passos simples (máx. 3 passos).
+5. Linguagem humana: "Oi!", "Entendi!", "Pode me dizer..." — sem formalidade excessiva.
+6. Nunca cite nomes técnicos internos (tabelas, queries, servidores).
+7. Se não souber resolver → "Vou acionar um técnico para te ajudar! Um momento 🙏"
+8. Responda sempre em português do Brasil.
+9. Use emojis com moderação (1-2 por mensagem máx).`
+
 function compactarCasos(casos: ResultadoSemantico[]) {
   return casos.map((c) => ({
     id: c.id,
@@ -78,9 +96,12 @@ export async function gerarRespostaAssistidaComContexto(
 
   // Saudação simples — responde diretamente sem buscar RAG
   if (ehSaudacao(textoLimpo)) {
+    const saudacaoPrompt = audience === "cliente"
+      ? `MENSAGEM DO CLIENTE VIA WHATSAPP: "${textoLimpo}"\n\nResponda com uma saudação calorosa e curta (2 linhas máx), e pergunte como pode ajudar. Não faça múltiplas perguntas.`
+      : `MENSAGEM DO USUÁRIO: "${textoLimpo}"\n\nResponda de forma cordial e pergunte qual problema técnico o atendente precisa resolver. Seja breve (2-3 linhas).`
     const resposta = await gerarTextoIA(
-      SYSTEM_PROMPT,
-      `MENSAGEM DO USUÁRIO: "${textoLimpo}"\n\nResponda de forma cordial e pergunte qual problema técnico o atendente precisa resolver. Seja breve (2-3 linhas).`,
+      audience === "cliente" ? SYSTEM_PROMPT_WHATSAPP : SYSTEM_PROMPT,
+      saudacaoPrompt,
     )
     return { resposta, casos: [], confianca: "baixa" as const }
   }
@@ -96,16 +117,20 @@ export async function gerarRespostaAssistidaComContexto(
     : "[]"
 
   const prompt = audience === "cliente"
-    ? `MENSAGEM DO CLIENTE: "${textoLimpo}"
+    ? `MENSAGEM DO CLIENTE VIA WHATSAPP: "${textoLimpo}"
 
-CASOS SIMILARES DO BANCO (similaridade máxima: ${topSimilaridade.toFixed(2)}):
+CONTEXTO DO BANCO (similaridade máxima: ${topSimilaridade.toFixed(2)}):
 ${casosJson}
 
-Escreva uma resposta para o cliente final (não técnico):
-1) Reconheça o problema em 1 frase simples
-2) Explique o que provavelmente está acontecendo (sem jargão técnico)
-3) Liste 2-4 passos simples e seguros para o cliente tentar
-4) Indique quando solicitar o técnico e o que dizer a ele`
+${temContexto
+  ? `Baseado no contexto, responda de forma CURTA e DIRETA (máx 5 linhas):
+- Reconheça o problema em 1 frase
+- Dê 1-3 passos simples para resolver OU peça UMA informação específica para avançar
+- Finalize com ação clara para o cliente`
+  : `Não há contexto suficiente. Faça UMA ÚNICA pergunta para entender melhor o problema.
+Escolha a pergunta mais importante: qual aparelho/sistema está com problema, qual mensagem aparece na tela, ou quando começou.
+NÃO faça lista de perguntas — apenas UMA.`
+}`
     : `PROBLEMA RELATADO: "${textoLimpo}"
 
 CASOS SIMILARES DO BANCO (similaridade máxima: ${topSimilaridade.toFixed(2)}):
@@ -123,7 +148,7 @@ Responda de forma útil pedindo informações adicionais para diagnosticar o pro
 }`
 
   const resposta = await gerarTextoIA(
-    audience === "cliente" ? SYSTEM_PROMPT_CLIENTE : SYSTEM_PROMPT,
+    audience === "cliente" ? SYSTEM_PROMPT_WHATSAPP : SYSTEM_PROMPT,
     prompt,
   )
   return { resposta, casos: casosCompactados, confianca }
@@ -133,5 +158,16 @@ export async function gerarRespostaAssistida(
   texto: string
 ): Promise<string> {
   const result = await gerarRespostaAssistidaComContexto(texto, "atendente")
+  return result.resposta
+}
+
+// Específico para WhatsApp — audience cliente + prompt otimizado para conversas curtas
+export async function gerarRespostaCliente(
+  texto: string,
+  nomeCliente?: string,
+): Promise<string> {
+  const saudacao = nomeCliente ? `O cliente se chama ${nomeCliente}. ` : ""
+  const textoComContexto = saudacao ? `[${saudacao}]\n${texto}` : texto
+  const result = await gerarRespostaAssistidaComContexto(textoComContexto, "cliente")
   return result.resposta
 }
