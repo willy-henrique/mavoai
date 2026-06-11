@@ -63,7 +63,7 @@ export async function POST(request: Request) {
 
   // ── ÁUDIO: transcreve com Whisper e responde ──────────────────────────────
   if (messageType === "audio" || messageType === "voice") {
-    if (!mediaUrl) return mtalkError("Não consegui acessar o áudio. Pode digitar sua mensagem? 🙏")
+    if (!mediaUrl) return mtalkError("Não consegui acessar o áudio. Pode digitar sua mensagem?")
     try {
       logger.info("mtalk_audio_transcrevendo", { ticketId })
       const audioRes = await fetch(mediaUrl)
@@ -78,13 +78,13 @@ export async function POST(request: Request) {
       return mtalkResponse(resposta)
     } catch (err) {
       logger.warn("mtalk_audio_erro", { ticketId, error: String(err) })
-      return mtalkError("Ouvi um áudio, mas tive dificuldade em entendê-lo. Pode digitar o que precisa? 😊")
+      return mtalkError("Ouvi um áudio, mas tive dificuldade em entendê-lo. Pode digitar o que precisa?")
     }
   }
 
   // ── IMAGEM: analisa com visão do Llama 4 Scout ────────────────────────────
   if (messageType === "image") {
-    if (!mediaUrl) return mtalkError("Não consegui acessar a imagem. Pode descrever o problema? 🙏")
+    if (!mediaUrl) return mtalkError("Não consegui acessar a imagem. Pode descrever o problema?")
     try {
       logger.info("mtalk_imagem_analisando", { ticketId })
       const resposta = await analisarImagemIA(mediaUrl, SYSTEM_PROMPT_WHATSAPP)
@@ -92,17 +92,17 @@ export async function POST(request: Request) {
       return mtalkResponse(resposta)
     } catch (err) {
       logger.warn("mtalk_imagem_erro", { ticketId, error: String(err) })
-      return mtalkError("Recebi a imagem, mas tive dificuldade em processá-la. Pode descrever o que aparece na tela? 😊")
+      return mtalkError("Recebi a imagem, mas tive dificuldade em processá-la. Pode descrever o que aparece na tela?")
     }
   }
 
   // ── TIPO NÃO SUPORTADO (vídeo, sticker, etc.) ────────────────────────────
   if (messageType !== "text") {
     logger.warn("mtalk_tipo_nao_suportado", { ticketId, messageType })
-    return mtalkError("Recebi sua mensagem! No momento processo texto, áudio e imagem. Para outros tipos, um atendente entrará em contato. 😊")
+    return mtalkError("Recebi sua mensagem! No momento processo texto, áudio e imagem. Para outros tipos, um atendente entrará em contato.")
   }
 
-  if (!mensagem) return mtalkError("Não recebi nenhuma mensagem. Pode tentar novamente? 🙏")
+  if (!mensagem) return mtalkError("Não recebi nenhuma mensagem. Pode tentar novamente?")
 
   // ── TEXTO: fluxo normal com RAG ───────────────────────────────────────────
   const baseUrl = process.env.INTERNAL_BASE_URL || new URL(request.url).origin
@@ -141,6 +141,6 @@ export async function POST(request: Request) {
     return mtalkResponse(resposta)
   } catch (err) {
     logger.warn("mtalk_ia_erro", { ticketId, error: err instanceof Error ? err.message : String(err) })
-    return mtalkError("Olá! Recebi sua mensagem. Em breve um atendente entrará em contato. 😊")
+    return mtalkError("Olá! Recebi sua mensagem. Em breve um atendente entrará em contato.")
   }
 }
