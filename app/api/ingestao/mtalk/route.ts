@@ -23,7 +23,8 @@
  * NÃO é necessário chamar a API de envio separadamente.
  */
 
-import { gerarRespostaCliente } from "@/lib/assisted-response"
+import { gerarRespostaCliente, SYSTEM_PROMPT_WHATSAPP } from "@/lib/assisted-response"
+import { analisarImagemIA, transcreverAudioIA } from "@/lib/ai-provider"
 import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { after } from "next/server"
@@ -51,26 +52,59 @@ export async function POST(request: Request) {
   const from = (metadata.from ?? {}) as Record<string, unknown>
 
   const mensagem = String(raw.content ?? raw.text ?? "").trim()
+  const mediaUrl = String(raw.mediaUrl ?? raw.media_url ?? "").trim()
   const ticketId = String(metadata.ticketId ?? raw.ticket_id ?? "")
   const contactName = String(from.name ?? raw.contactName ?? "cliente")
   const contactId = String(from.id ?? "")
   const messageType = String(raw.type ?? "text")
+  const nomeParaIA = contactName !== "cliente" ? contactName : undefined
 
-  // Loga o recebimento
-  logger.info("mtalk_webhook_recebido", {
-    ticketId,
-    contactName,
-    messageType,
-    mensagemLen: mensagem.length,
-  })
+  logger.info("mtalk_webhook_recebido", { ticketId, contactName, messageType, mensagemLen: mensagem.length, temMedia: !!mediaUrl })
 
-  // Ignora mensagens que não são texto (áudio, imagem — sem processamento IA por ora)
-  if (messageType !== "text" || !mensagem) {
-    logger.warn("mtalk_mensagem_nao_texto", { ticketId, messageType })
-    return mtalkError("Desculpe, no momento só consigo processar mensagens de texto. Em breve um atendente te ajudará! 😊")
+  // ── ÁUDIO: transcreve com Whisper e responde ──────────────────────────────
+  if (messageType === "audio" || messageType === "voice") {
+    if (!mediaUrl) return mtalkError("Não consegui acessar o áudio. Pode digitar sua mensagem? 🙏")
+    try {
+      logger.info("mtalk_audio_transcrevendo", { ticketId })
+      const audioRes = await fetch(mediaUrl)
+      if (!audioRes.ok) throw new Error(`download falhou: ${audioRes.status}`)
+      const audioBuffer = await audioRes.arrayBuffer()
+      const ext = mediaUrl.split(".").pop()?.split("?")[0] || "ogg"
+      const transcript = await transcreverAudioIA(audioBuffer, `audio.${ext}`)
+      logger.info("mtalk_audio_transcrito", { ticketId, len: transcript.length, preview: transcript.slice(0, 60) })
+
+      const resposta = await gerarRespostaCliente(transcript, nomeParaIA)
+      logger.info("mtalk_resposta_ok", { ticketId, tipo: "audio", len: resposta.length })
+      return mtalkResponse(resposta)
+    } catch (err) {
+      logger.warn("mtalk_audio_erro", { ticketId, error: String(err) })
+      return mtalkError("Ouvi um áudio, mas tive dificuldade em entendê-lo. Pode digitar o que precisa? 😊")
+    }
   }
 
-  // Salva em background para RAG (não bloqueia a resposta)
+  // ── IMAGEM: analisa com visão do Llama 4 Scout ────────────────────────────
+  if (messageType === "image") {
+    if (!mediaUrl) return mtalkError("Não consegui acessar a imagem. Pode descrever o problema? 🙏")
+    try {
+      logger.info("mtalk_imagem_analisando", { ticketId })
+      const resposta = await analisarImagemIA(mediaUrl, SYSTEM_PROMPT_WHATSAPP)
+      logger.info("mtalk_resposta_ok", { ticketId, tipo: "image", len: resposta.length })
+      return mtalkResponse(resposta)
+    } catch (err) {
+      logger.warn("mtalk_imagem_erro", { ticketId, error: String(err) })
+      return mtalkError("Recebi a imagem, mas tive dificuldade em processá-la. Pode descrever o que aparece na tela? 😊")
+    }
+  }
+
+  // ── TIPO NÃO SUPORTADO (vídeo, sticker, etc.) ────────────────────────────
+  if (messageType !== "text") {
+    logger.warn("mtalk_tipo_nao_suportado", { ticketId, messageType })
+    return mtalkError("Recebi sua mensagem! No momento processo texto, áudio e imagem. Para outros tipos, um atendente entrará em contato. 😊")
+  }
+
+  if (!mensagem) return mtalkError("Não recebi nenhuma mensagem. Pode tentar novamente? 🙏")
+
+  // ── TEXTO: fluxo normal com RAG ───────────────────────────────────────────
   const baseUrl = process.env.INTERNAL_BASE_URL || new URL(request.url).origin
   const authHeader = request.headers.get("authorization") || ""
 
@@ -101,19 +135,12 @@ export async function POST(request: Request) {
     }
   })
 
-  // Gera resposta da IA
   try {
-    const resposta = await gerarRespostaCliente(mensagem, contactName !== "cliente" ? contactName : undefined)
-    logger.info("mtalk_resposta_ok", { ticketId, contactName, len: resposta.length })
-
-    // Retorna no formato que o MTalk lê e envia como WhatsApp
+    const resposta = await gerarRespostaCliente(mensagem, nomeParaIA)
+    logger.info("mtalk_resposta_ok", { ticketId, tipo: "text", contactName, len: resposta.length })
     return mtalkResponse(resposta)
-
   } catch (err) {
-    logger.warn("mtalk_ia_erro", {
-      ticketId,
-      error: err instanceof Error ? err.message : String(err),
-    })
+    logger.warn("mtalk_ia_erro", { ticketId, error: err instanceof Error ? err.message : String(err) })
     return mtalkError("Olá! Recebi sua mensagem. Em breve um atendente entrará em contato. 😊")
   }
 }

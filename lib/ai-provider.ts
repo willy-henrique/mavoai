@@ -213,6 +213,85 @@ export async function gerarTextoIACurador(system: string, prompt: string): Promi
   }
 }
 
+// Modelo de visão fixo — Llama 4 Scout é multimodal no Groq
+const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+// Modelo de transcrição de áudio — Whisper turbo no Groq
+const AUDIO_MODEL = "whisper-large-v3-turbo"
+
+/**
+ * Analisa uma imagem (screenshot de sistema, erro na tela, etc.) e gera uma
+ * resposta de suporte baseada no que é visível. Usa Llama 4 Scout vision via Groq.
+ */
+export async function analisarImagemIA(imageUrl: string, system: string): Promise<string> {
+  const groqKey = getGroqApiKey()
+  if (!groqKey) throw new Error("GROQ_API_KEY nao configurada para visao")
+
+  // Baixa a imagem e converte para base64 (evita problemas de URL privada)
+  const imgRes = await fetch(imageUrl)
+  if (!imgRes.ok) throw new Error(`Falha ao baixar imagem: ${imgRes.status}`)
+  const contentType = imgRes.headers.get("content-type") || "image/jpeg"
+  const buffer = await imgRes.arrayBuffer()
+  const base64 = Buffer.from(buffer).toString("base64")
+  const dataUrl = `data:${contentType};base64,${base64}`
+
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
+    body: JSON.stringify({
+      model: VISION_MODEL,
+      messages: [
+        { role: "system", content: system },
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: dataUrl } },
+            { type: "text", text: "O cliente enviou esta imagem. Analise o que está na tela e responda como suporte técnico." },
+          ],
+        },
+      ],
+      temperature: 0.2,
+      max_tokens: 1024,
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`Erro na visao IA: ${response.status} ${err.slice(0, 200)}`)
+  }
+  const data = await response.json()
+  const text = data?.choices?.[0]?.message?.content
+  if (!text) throw new Error("Resposta de visao vazia")
+  return text
+}
+
+/**
+ * Transcreve um áudio (WhatsApp PTT ou arquivo) usando Whisper via Groq.
+ * Retorna o texto transcrito em português.
+ */
+export async function transcreverAudioIA(audioBuffer: ArrayBuffer, filename: string): Promise<string> {
+  const groqKey = getGroqApiKey()
+  if (!groqKey) throw new Error("GROQ_API_KEY nao configurada para transcricao")
+
+  const form = new FormData()
+  form.append("file", new Blob([audioBuffer]), filename)
+  form.append("model", AUDIO_MODEL)
+  form.append("language", "pt")
+  form.append("response_format", "text")
+
+  const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${groqKey}` },
+    body: form,
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`Erro na transcricao de audio: ${response.status} ${err.slice(0, 200)}`)
+  }
+  const transcript = await response.text()
+  return transcript.trim()
+}
+
 /**
  * Gera embedding via API compatível com OpenAI (OpenAI, Jina AI, Voyage, etc).
  * @param task  "retrieval.query" para buscas, "retrieval.passage" para indexação (Jina/Matryoshka).
