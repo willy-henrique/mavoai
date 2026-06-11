@@ -7,7 +7,7 @@ describe("parseInvestigationEvalJson", () => {
       `{"nivel":"insuficiente","motivoCurto":"só menu","textoResposta":"Preciso do print da tela do sistema."}`,
     )
     expect(r?.nivel).toBe("insuficiente")
-    expect(r?.textoResposta).toContain("print")
+    expect(r?.motivoCurto).toBe("só menu")
   })
 
   it("remove cercas markdown", () => {

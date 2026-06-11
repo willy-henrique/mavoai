@@ -39,7 +39,8 @@ describe("buscarSemantica", () => {
     expect(String(vi.mocked(query).mock.calls[0][0])).toContain("buscar_atendimentos_semanticos")
     expect(resultado).toHaveLength(1)
     expect(resultado[0].estrategia).toBe("vetorial")
-    expect(resultado[0].similaridade).toBe(0.92)
+    // score híbrido: 0.92 * 0.7 + (1/3) * 0.3 ≈ 0.744 ("impressora" match, "com"/"problema" não)
+    expect(resultado[0].similaridade).toBeCloseTo(0.744, 2)
   })
 
   it("cai no fallback textual quando embedding lança erro", async () => {
