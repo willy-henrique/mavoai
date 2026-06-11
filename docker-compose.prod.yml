@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mavoai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mavoai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-mudar_senha_producao}"
+    volumes:
+      - mavoai_postgres_data:/var/lib/postgresql/data
+      - ./scripts/000_SETUP_COMPLETO.sql:/docker-entrypoint-initdb.d/000_SETUP_COMPLETO.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mavoai"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+    networks:
+      - mavoai
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mavoai-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-mudar_senha_producao}@postgres:5432/mavoai"
+      INTERNAL_BASE_URL: "http://localhost:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mavoai
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  mavoai:
+    driver: bridge
+
+volumes:
+  mavoai_postgres_data:

@@ -97,26 +97,31 @@ export async function buscarSemantica(
   const filtro = montarFiltroIlike(termos) // mantido para futura observabilidade
   let fallbackData: any[] = []
 
-  if (filtro || termos.length > 0) {
-    const result = await query(
-      `SELECT id, resumo, resumo_problema, problema, causa, solucao, texto_original
-       FROM buscar_atendimentos_simples($1, $2, $3::text)`,
-      [termos.join(" "), limite, tenantId ?? null]
-    )
-    fallbackData = result.rows || []
-  }
+  try {
+    if (filtro || termos.length > 0) {
+      const result = await query(
+        `SELECT id, resumo, resumo_problema, problema, causa, solucao, texto_original
+         FROM buscar_atendimentos_simples($1, $2, $3::text)`,
+        [termos.join(" "), limite, tenantId ?? null]
+      )
+      fallbackData = result.rows || []
+    }
 
-  // Se não houver casos processados úteis, volta para texto bruto para não zerar resposta.
-  if (!fallbackData || fallbackData.length === 0) {
-    const raw = await query(
-      `SELECT id, resumo, resumo_problema, problema, causa, solucao, texto_original
-       FROM atendimentos
-       WHERE ($1::text IS NULL OR tenant_id = $1::text)
-       ORDER BY updated_at DESC
-       LIMIT $2`,
-      [tenantId ?? null, limite]
-    )
-    fallbackData = raw.rows || []
+    // Se não houver casos processados úteis, volta para texto bruto para não zerar resposta.
+    if (!fallbackData || fallbackData.length === 0) {
+      const raw = await query(
+        `SELECT id, resumo, resumo_problema, problema, causa, solucao, texto_original
+         FROM atendimentos
+         WHERE ($1::text IS NULL OR tenant_id = $1::text)
+         ORDER BY updated_at DESC
+         LIMIT $2`,
+        [tenantId ?? null, limite]
+      )
+      fallbackData = raw.rows || []
+    }
+  } catch {
+    // Postgres offline — IA responde sem contexto RAG
+    return []
   }
 
   const ranked = (fallbackData || [])
