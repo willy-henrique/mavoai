@@ -395,7 +395,7 @@ export async function POST(request: Request) {
           clearTimeout(timer)
         } else {
           const resultado = await Promise.race([
-            gerarRespostaWhatsApp(mensagens, cliente, conversa.messages),
+            gerarRespostaWhatsApp(mensagens, cliente, conversa.messages, tenantId),
             new Promise<never>((_, reject) => {
               ac.signal.addEventListener("abort", () =>
                 reject(new Error("auto-reply timeout"))

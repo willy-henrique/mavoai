@@ -11,10 +11,14 @@
  * Não precisa de JWT — o browser lê os tickets, o Cerebro só responde.
  */
 
-import { gerarRespostaAssistida } from "@/lib/assisted-response"
+import { gerarRespostaWhatsApp, pediuHumano } from "@/lib/assisted-response"
+import { carregarConversa, salvarConversa, marcarHandoff } from "@/lib/whatsapp-memory"
+import { notifyHandoff } from "@/lib/handoff-notifier"
 import { getSecret } from "@/lib/secret-store"
 import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
+
+const MSG_HANDOFF = "Já estou te passando para um atendente, tá? Só um instante que alguém continua por aqui."
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -68,10 +72,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "MTALK_BASE_URL ou MTALK_API_TOKEN não configurados" }, { status: 500, headers: CORS })
     }
 
-    // Gera resposta da IA
+    // Memória da conversa (mesma do webhook) — evita reapresentação e dá contexto.
+    const conversa = await carregarConversa(ticketId)
+    if (conversa.handoff) {
+      return NextResponse.json({ skipped: true, reason: "handoff" }, { headers: CORS })
+    }
+
+    // Gera resposta da IA (com memória + especialista do domínio) ou decide escalar.
     let resposta: string
+    let escalou = false
+    let dominio = "geral"
     try {
-      resposta = await gerarRespostaAssistida(message)
+      if (pediuHumano(message)) {
+        resposta = MSG_HANDOFF
+        escalou = true
+      } else {
+        const r = await gerarRespostaWhatsApp(message, contactName, conversa.messages, "default")
+        dominio = r.domain
+        if (r.escalar) {
+          resposta = MSG_HANDOFF
+          escalou = true
+        } else {
+          resposta = r.resposta
+        }
+      }
     } catch (err) {
       logger.warn("mtalk_reply_ia_erro", { ticketId, error: String(err) })
       replied.delete(key) // permite tentar de novo
@@ -95,8 +119,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `MTalk send falhou: ${sendResp.status}` }, { status: 502, headers: CORS })
     }
 
-    logger.info("mtalk_reply_ok", { ticketId, contact: contactName ?? contactNumber, len: resposta.length })
-    return NextResponse.json({ ok: true, ticketId, contact: contactName }, { headers: CORS })
+    // Persiste a memória só após o envio dar certo.
+    if (escalou) {
+      conversa.messages.push({ role: "user", content: message })
+      await marcarHandoff(ticketId, conversa)
+      notifyHandoff({
+        tenantId: "default",
+        sourceSystem: "mtalk",
+        conversationId: ticketId,
+        platform: "whatsapp",
+        queueId: null,
+        cliente: { nome: contactName ?? "", telefone: contactNumber },
+        summary: `Cliente: ${contactName ?? contactNumber}. Última mensagem: "${message.slice(0, 280)}".`,
+        reason: pediuHumano(message) ? "cliente_pediu_humano" : "ia_nao_resolveu",
+      }).catch(() => undefined)
+    } else {
+      conversa.messages.push({ role: "user", content: message }, { role: "assistant", content: resposta })
+      await salvarConversa(ticketId, conversa)
+    }
+
+    logger.info("mtalk_reply_ok", { ticketId, contact: contactName ?? contactNumber, dominio, escalou, len: resposta.length })
+    return NextResponse.json({ ok: true, ticketId, contact: contactName, dominio }, { headers: CORS })
 
   } catch (err) {
     logger.warn("mtalk_reply_erro", { error: String(err) })

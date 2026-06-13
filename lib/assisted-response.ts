@@ -1,6 +1,7 @@
-import { gerarTextoIA, gerarTextoIAConversa } from "@/lib/ai-provider"
+import { gerarTextoIA, gerarTextoIAConversa, gerarTextoIAConversaComAgente } from "@/lib/ai-provider"
 import { buscarSemantica } from "@/lib/semantic-search"
 import { ANTI_HALLUCINATION_BLOCK, isEscalationSignal } from "@/lib/escalation-detector"
+import { classifyDomain } from "@/lib/ia-router"
 import type { ResultadoSemantico } from "@/lib/semantic-search"
 import type { ChatTurn } from "@/lib/whatsapp-memory"
 
@@ -232,32 +233,41 @@ Se você CONSEGUE ajudar, NÃO escale: ajude de forma direta.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
 
 /**
- * Gera a resposta da Mavo AI para o WhatsApp levando em conta o HISTÓRICO da conversa.
+ * Gera a resposta da Mavo AI para o WhatsApp levando em conta o HISTÓRICO da conversa
+ * e ROTEANDO para o especialista do domínio (fiscal, PDV, TEF, estoque, hardware,
+ * integração) quando a demanda se encaixa em uma área. Retorna o domínio acionado.
  * Retorna { escalar: true } quando a IA decide passar para um humano.
  */
 export async function gerarRespostaWhatsApp(
   mensagem: string,
   nomeCliente: string | undefined,
   historico: ChatTurn[],
-): Promise<{ resposta: string; escalar: boolean }> {
+  tenantId = "default",
+): Promise<{ resposta: string; escalar: boolean; domain: string }> {
   const textoLimpo = mensagem.trim().slice(0, 8000)
   const ehPrimeira = historico.length === 0
   const primeiroNome = nomeCliente?.trim().split(/\s+/)[0]
 
-  // Busca RAG só quando a mensagem parece um problema (não num "oi" de abertura).
-  let contextoRag = ""
   const pareceProblema = !ehSaudacao(textoLimpo) || !ehPrimeira
+
+  // Roteamento + RAG em paralelo (só quando parece um problema, não num "oi").
+  let contextoRag = ""
+  let especialista = null as Awaited<ReturnType<typeof classifyDomain>>["agent"]
+  let dominio = "geral"
   if (pareceProblema) {
-    try {
-      const casos = await buscarSemantica(textoLimpo, 4)
-      const top = Number(casos[0]?.similaridade || 0)
-      if (top >= 0.35) {
-        contextoRag =
-          `\n\nCONHECIMENTO INTERNO (use para resolver; NÃO diga que veio de uma "base" nem cite os termos técnicos internos):\n` +
-          JSON.stringify(compactarCasos(casos), null, 2)
-      }
-    } catch {
-      // Sem RAG segue conversando normalmente.
+    const [rota, casos] = await Promise.all([
+      classifyDomain(textoLimpo, tenantId).catch(() => null),
+      buscarSemantica(textoLimpo, 4).catch(() => []),
+    ])
+    if (rota) {
+      especialista = rota.agent
+      dominio = rota.domain
+    }
+    const top = Number(casos[0]?.similaridade || 0)
+    if (top >= 0.35) {
+      contextoRag =
+        `\n\nCONHECIMENTO INTERNO (use para resolver; NÃO diga que veio de uma "base" nem cite os termos técnicos internos):\n` +
+        JSON.stringify(compactarCasos(casos), null, 2)
     }
   }
 
@@ -265,17 +275,25 @@ export async function gerarRespostaWhatsApp(
     ? ""
     : `\n\nIMPORTANTE: você JÁ está no meio de uma conversa com este cliente (veja o histórico acima). NÃO se apresente de novo, NÃO repita "Sou a Mavo AI", NÃO recomece com saudação. Apenas continue naturalmente de onde parou.`
 
+  // Conhecimento do especialista acionado (roteiro de diagnóstico da área).
+  const blocoEspecialista = especialista
+    ? `\n\n━━━ ESPECIALISTA ACIONADO: ${especialista.name} (${dominio}) ━━━\n` +
+      `Você está atuando com o conhecimento do especialista em ${dominio}. Use o roteiro de diagnóstico abaixo para resolver, mas SEMPRE no tom de WhatsApp curto e humano definido lá em cima (sem despejar todos os passos de uma vez — uma coisa por vez):\n` +
+      especialista.system_prompt
+    : ""
+
   const system =
     SYSTEM_PROMPT_WHATSAPP +
     (primeiroNome ? `\n\nO cliente se chama ${primeiroNome} — trate pelo primeiro nome, sem repetir o nome toda hora.` : "") +
     continuidade +
+    blocoEspecialista +
     contextoRag +
     ESCALACAO_WHATSAPP
 
-  const raw = await gerarTextoIAConversa(system, historico, textoLimpo)
+  const raw = await gerarTextoIAConversaComAgente(especialista, system, historico, textoLimpo)
 
   if (isEscalationSignal(raw)) {
-    return { resposta: "", escalar: true }
+    return { resposta: "", escalar: true, domain: dominio }
   }
-  return { resposta: raw.trim(), escalar: false }
+  return { resposta: raw.trim(), escalar: false, domain: dominio }
 }

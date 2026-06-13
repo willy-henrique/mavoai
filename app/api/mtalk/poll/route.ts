@@ -8,9 +8,12 @@
  *  3. Se login falha (ERR_MAX_ACTIVE_DESKTOP_SESSIONS), usa POST manual como fallback
  */
 
-import { gerarRespostaAssistida } from "@/lib/assisted-response"
+import { gerarRespostaWhatsApp } from "@/lib/assisted-response"
+import type { ChatTurn } from "@/lib/whatsapp-memory"
 import { getSecret } from "@/lib/secret-store"
 import { logger } from "@/lib/logger"
+
+const MSG_HANDOFF = "Já estou te passando para um atendente, tá? Só um instante que alguém continua por aqui."
 import { NextResponse } from "next/server"
 
 const CORS_HEADERS = {
@@ -198,10 +201,19 @@ export async function GET() {
     const alreadyDone = respondedMessages.get(ticket.id)
     if (alreadyDone === lastMsg.id || alreadyDone === String(lastMsg.id)) continue
 
-    // IA
+    // Histórico a partir da própria thread do MTalk (fonte da verdade) —
+    // assim a IA tem contexto e não se reapresenta a cada mensagem.
+    const historico: ChatTurn[] = sorted
+      .slice(0, -1)
+      .filter((m) => m.body?.trim())
+      .map((m) => ({ role: m.fromMe ? ("assistant" as const) : ("user" as const), content: m.body!.trim() }))
+      .slice(-14)
+
+    // IA com memória + roteamento para o especialista do domínio
     let resposta: string
     try {
-      resposta = await gerarRespostaAssistida(lastMsg.body)
+      const r = await gerarRespostaWhatsApp(lastMsg.body, ticket.contact?.name, historico, "default")
+      resposta = r.escalar ? MSG_HANDOFF : r.resposta
     } catch (err) {
       logger.warn("mtalk_poll_ia_erro", { ticketId: ticketIdStr, error: String(err) })
       results.push({ ticketId: ticketIdStr, contact: ticket.contact?.name ?? "?", status: "ia_error" })

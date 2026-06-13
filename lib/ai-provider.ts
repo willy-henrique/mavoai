@@ -259,6 +259,39 @@ export async function gerarTextoIAConversa(
 }
 
 /**
+ * Conversa multi-turno (com histórico) usando o modelo do AGENTE especialista.
+ * Sem override no agente → cai no modelo global de conversa.
+ * Usado pelo atendimento do WhatsApp quando o roteador aciona um especialista.
+ */
+export async function gerarTextoIAConversaComAgente(
+  agent: { model_base_url?: string | null; model_name?: string | null } | null,
+  system: string,
+  historico: Array<{ role: "user" | "assistant"; content: string }>,
+  mensagemAtual: string,
+): Promise<string> {
+  const agentBaseUrl = agent?.model_base_url?.trim() || null
+  const agentModel   = agent?.model_name?.trim() || null
+
+  // Sem override → usa o caminho global (mesmo modelo de conversa).
+  if (!agentBaseUrl && !agentModel) {
+    return gerarTextoIAConversa(system, historico, mensagemAtual)
+  }
+
+  const globalConfig = await getChatConfig()
+  const baseUrl = agentBaseUrl ?? globalConfig.baseUrl
+  const model   = agentModel   ?? globalConfig.model
+  const apiKey  = (await resolveApiKeyForUrl(baseUrl)) || globalConfig.apiKey
+  if (!apiKey) throw new Error(`API key nao encontrada para provider: ${baseUrl}`)
+
+  const messages = [
+    { role: "system" as const, content: system },
+    ...historico,
+    { role: "user" as const, content: mensagemAtual },
+  ]
+  return callChatMessages(baseUrl, apiKey, model, messages, 0.35)
+}
+
+/**
  * Gera texto usando o modelo e provider configurados no agente especialista.
  * Suporta Groq, Google Gemini, Anthropic Claude e qualquer OpenAI-compatible.
  * Fallback automático para o modelo global se o agente não tiver override.
