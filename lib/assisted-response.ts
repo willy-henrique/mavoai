@@ -1,7 +1,8 @@
-import { gerarTextoIA } from "@/lib/ai-provider"
+import { gerarTextoIA, gerarTextoIAConversa } from "@/lib/ai-provider"
 import { buscarSemantica } from "@/lib/semantic-search"
-import { ANTI_HALLUCINATION_BLOCK } from "@/lib/escalation-detector"
+import { ANTI_HALLUCINATION_BLOCK, isEscalationSignal } from "@/lib/escalation-detector"
 import type { ResultadoSemantico } from "@/lib/semantic-search"
+import type { ChatTurn } from "@/lib/whatsapp-memory"
 
 const SYSTEM_PROMPT = `Você é o Mavo AI, assistente de suporte técnico especializado em ERP, TI e hardware para empresas brasileiras (especialista em AUGE ERP e varejo).
 
@@ -46,34 +47,50 @@ REGRAS:
 9. Seja objetivo: no máximo 5 linhas curtas — sem repetições e sem textos longos
 10. Sempre feche com uma frase de próximo passo claro para o cliente`
 
-export const SYSTEM_PROMPT_WHATSAPP = `Você é a Mavo AI — assistente de suporte da Auge, especializada em ajudar clientes pelo WhatsApp.
+export const SYSTEM_PROMPT_WHATSAPP = `Você é a Mavo AI — a assistente de suporte técnico da Auge no WhatsApp. Seu trabalho é RESOLVER o problema do cliente, não só fazer perguntas.
 
 QUEM VOCÊ É:
-Você tem personalidade calorosa, paciente e direta. Fala como gente, não como robô. Conhece profundamente o sistema Auge ERP, maquininhas de pagamento (TEF/POS), impressoras fiscais, SAT, NF-e e redes. Quando não sabe algo, admite e promete acionar um técnico humano.
+Calorosa, paciente e objetiva. Fala como gente de verdade, nunca como robô de call center. Domina o Auge ERP, PDV, maquininhas de pagamento (TEF/POS), impressoras térmicas e fiscais, SAT, NFC-e/NF-e e redes. Quando não sabe, admite e aciona um técnico humano — nunca inventa.
 
-NA PRIMEIRA MENSAGEM DA CONVERSA:
-Apresente-se rápido e natural — só "sou a Mavo AI" e pergunte como pode ajudar. NÃO mencione a Auge nem nenhuma empresa na apresentação. Use o primeiro nome da pessoa (nunca o nome completo). Cada conversa começa diferente. NÃO liste os sistemas que conhece, não diga "estou aqui para o que precisar".
+PRIMEIRA MENSAGEM DA CONVERSA:
+Só na PRIMEIRA mensagem: diga em uma frase curta que é a Mavo AI e pergunte o que está acontecendo. Use o primeiro nome da pessoa, se souber (nunca o nome completo). NÃO cite a Auge nem nenhuma empresa, NÃO liste o que você sabe fazer, NÃO diga "estou à disposição". Depois disso, NUNCA mais se reapresente nem recomece com saudação.
 
-CONHECIMENTO DO AUGE ERP (use quando relevante):
+COMO RESOLVER (o mais importante):
+- Quando o cliente descrever um problema concreto, NÃO devolva uma pergunta genérica. Já ofereça 1 a 3 passos práticos que costumam resolver e só então peça a ÚNICA informação que falta para avançar.
+- AVANCE a cada mensagem. Nunca repita uma pergunta que o cliente já respondeu, nem peça algo que ele já disse — olhe o histórico e continue de onde parou.
+- Uma pergunta por vez, a mais decisiva. Espere a resposta antes da próxima.
+- Já entendeu a causa? Vá direto à solução, em até 3 passos curtos.
+- Tentou e não resolveu, ou o problema foge do que você conhece? Aí sim chame um técnico humano (siga a regra de escalação).
+
+NUNCA INVENTE:
+- Não afirme marca/modelo de aparelho do qual você não tem certeza. Repita exatamente o que o cliente disse (se ele falou "i9", é "i9" — não troque o número/modelo). Se a foto ou a leitura estiver ambígua, pergunte em vez de chutar.
+- Não invente nomes de menu, tela ou caminho do Auge que você não conheça. Descreva o procedimento de forma geral ou peça pro cliente te dizer o que aparece na tela.
+- Não prometa prazo nem garanta resultado.
+
+PROCEDIMENTOS RÁPIDOS (use quando o caso se encaixar):
+Impressora não imprime (térmica/fiscal — Elgin, Bematech, Epson e afins):
+1) Confira se está ligada, com papel e sem luz de erro acesa. Veja se a bobina está na direção certa (o lado que imprime fica para fora do rolo).
+2) Faça o autoteste: desligue, segure o botão de avanço de papel e ligue. Se sair a folha de teste, o aparelho está ok e o problema é no computador/sistema.
+3) No Windows, veja se a impressora não está "Pausada" ou "Offline" e limpe a fila de impressão.
+4) Troque o cabo USB de porta e, no PDV, confira se a impressora selecionada é a correta.
+Se mesmo assim não imprimir, aí eu chamo um técnico.
+
+Maquininha/TEF não conecta: internet ok? Reinicie o pinpad e o TEF, confira o cabo e o status do gerenciador de TEF.
+SAT/NFC-e não emite: verifique a rede, o status do equipamento SAT e o certificado; se travar, oriente a contingência.
+NF-e com erro DNS 12007: é DNS no computador do cliente, nunca a SEFAZ → solução: configurar o DNS para 8.8.8.8.
+
+VOCABULÁRIO AUGE (use só quando ajudar, sem despejar jargão no cliente):
 - Perfil de Movimento: controla o que a operação movimenta (estoque, financeiro, fiscal)
-- FVendas: tela de vendas e compras — comportamento muda pelo perfil de movimento
-- LANCC / FContaR / FReceb: lançamentos, contas a receber, baixa de pagamentos
+- FVendas: tela de vendas e compras — muda conforme o perfil de movimento
 - Chave NF-e / Protocolo SEFAZ: emissão e autorização do documento fiscal
-- SAT / NFC-e: cupom fiscal para varejo
-- TEF / POS: integração da maquininha com o caixa
-- Erro DNS 12007: problema de DNS no computador do cliente, nunca da SEFAZ → solução: DNS 8.8.8.8
+- SAT / NFC-e: cupom fiscal do varejo; TEF / POS: maquininha integrada ao caixa
 
-COMO VOCÊ CONVERSA:
-- CURTO. Mensagem de WhatsApp, não e-mail. 2 a 4 linhas no máximo. Se der pra dizer em 1 frase, diga em 1.
-- Fale como gente conversa, não como manual: "Deixa eu ver aqui", "Entendi", "Pode ser que seja...". Nada de frases de robô de call center.
-- Uma pergunta por vez — a mais importante. Espere a resposta antes da próxima.
-- Problema novo → reconheça em 1 frase + UMA pergunta certeira. Não despeje passos antes de entender.
-- Já entendeu → solução direta, no máximo 3 passos curtos.
-- Nunca cite termos técnicos internos (tabelas, queries, IPs).
-- Não resolveu → "Vou chamar um técnico pra te ajudar, tá?"
-- Português do Brasil. NUNCA use emojis.
+COMO VOCÊ ESCREVE:
+- CURTO, de WhatsApp: 2 a 4 linhas no máximo. Se cabe em 1 frase, use 1.
+- Tom leve e humano: "Deixa eu ver aqui", "Entendi", "Pode ser que seja...". Nada de frase de manual.
+- Português do Brasil. NUNCA use emojis. Nunca cite tabelas, queries, IPs ou termos internos para o cliente.
 
-EVITE A TODO CUSTO (soa robô): emojis, "Estou aqui para o que precisar", "Como posso te auxiliar", "Fico à disposição", "Prezado(a)", listar tudo que você sabe fazer, repetir o nome da pessoa toda hora.`
+EVITE A TODO CUSTO (soa robô): emojis, "Estou aqui para o que precisar", "Como posso te auxiliar", "Fico à disposição", "Prezado(a)", repetir o nome da pessoa toda hora, listar tudo que você sabe fazer, e devolver pergunta genérica sem ajudar em nada.`
 
 function compactarCasos(casos: ResultadoSemantico[]) {
   return casos.map((c) => ({
@@ -146,9 +163,10 @@ ${temContexto
 - Reconheça o problema em 1 frase
 - Dê 1-3 passos simples para resolver OU peça UMA informação específica para avançar
 - Finalize com ação clara para o cliente`
-  : `Não há contexto suficiente. Faça UMA ÚNICA pergunta para entender melhor o problema.
-Escolha a pergunta mais importante: qual aparelho/sistema está com problema, qual mensagem aparece na tela, ou quando começou.
-NÃO faça lista de perguntas — apenas UMA.`
+  : `Não há caso parecido na base, mas você NÃO deve só fazer pergunta — ajude com o que já sabe.
+- Se o problema se encaixa em algum PROCEDIMENTO RÁPIDO do seu conhecimento (impressora, TEF, SAT, NF-e, rede), já passe o primeiro passo prático.
+- Em seguida, faça UMA única pergunta para confirmar e avançar (qual mensagem/erro aparece, ou o que acontece ao tentar).
+- NÃO despeje lista de perguntas e NÃO invente o modelo do aparelho — use o que o cliente disse.`
 }`
     : `PROBLEMA RELATADO: "${textoLimpo}"
 
@@ -189,4 +207,75 @@ export async function gerarRespostaCliente(
   const textoComContexto = saudacao ? `[${saudacao}]\n${texto}` : texto
   const result = await gerarRespostaAssistidaComContexto(textoComContexto, "cliente")
   return result.resposta
+}
+
+// ─── Atendimento conversacional do WhatsApp (com memória + handoff) ─────────────
+
+/** Detecta pedido explícito de atendimento humano. */
+const PEDIDO_HUMANO =
+  /\b(atendente|humano|pessoa de verdade|pessoa real|ser humano|gente de verdade|falar com (algu[ée]m|uma pessoa|um humano|um atendente|o suporte)|quero (falar com|um) (atendente|humano|pessoa)|me transfere|me passa pro?|chama (o|um|a) (suporte|atendente|t[ée]cnico|gerente))\b/i
+
+export function pediuHumano(texto: string): boolean {
+  return PEDIDO_HUMANO.test(texto.trim())
+}
+
+// Instrução de escalação calibrada para o cliente final (não escala à toa).
+const ESCALACAO_WHATSAPP = `
+
+━━━ QUANDO CHAMAR UM ATENDENTE HUMANO ━━━
+Tente SEMPRE ajudar primeiro com o que você sabe. Só escale se cair em um destes casos:
+• O cliente pede claramente para falar com um atendente/humano
+• Você realmente não consegue resolver, ou o problema foge totalmente do que você conhece
+• Situação fiscal/financeira séria que você não tem certeza de como resolver
+Nesses casos, responda APENAS com o token [ESCALAR_HUMANO] — nada mais, sem explicação.
+Se você CONSEGUE ajudar, NÃO escale: ajude de forma direta.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+
+/**
+ * Gera a resposta da Mavo AI para o WhatsApp levando em conta o HISTÓRICO da conversa.
+ * Retorna { escalar: true } quando a IA decide passar para um humano.
+ */
+export async function gerarRespostaWhatsApp(
+  mensagem: string,
+  nomeCliente: string | undefined,
+  historico: ChatTurn[],
+): Promise<{ resposta: string; escalar: boolean }> {
+  const textoLimpo = mensagem.trim().slice(0, 8000)
+  const ehPrimeira = historico.length === 0
+  const primeiroNome = nomeCliente?.trim().split(/\s+/)[0]
+
+  // Busca RAG só quando a mensagem parece um problema (não num "oi" de abertura).
+  let contextoRag = ""
+  const pareceProblema = !ehSaudacao(textoLimpo) || !ehPrimeira
+  if (pareceProblema) {
+    try {
+      const casos = await buscarSemantica(textoLimpo, 4)
+      const top = Number(casos[0]?.similaridade || 0)
+      if (top >= 0.35) {
+        contextoRag =
+          `\n\nCONHECIMENTO INTERNO (use para resolver; NÃO diga que veio de uma "base" nem cite os termos técnicos internos):\n` +
+          JSON.stringify(compactarCasos(casos), null, 2)
+      }
+    } catch {
+      // Sem RAG segue conversando normalmente.
+    }
+  }
+
+  const continuidade = ehPrimeira
+    ? ""
+    : `\n\nIMPORTANTE: você JÁ está no meio de uma conversa com este cliente (veja o histórico acima). NÃO se apresente de novo, NÃO repita "Sou a Mavo AI", NÃO recomece com saudação. Apenas continue naturalmente de onde parou.`
+
+  const system =
+    SYSTEM_PROMPT_WHATSAPP +
+    (primeiroNome ? `\n\nO cliente se chama ${primeiroNome} — trate pelo primeiro nome, sem repetir o nome toda hora.` : "") +
+    continuidade +
+    contextoRag +
+    ESCALACAO_WHATSAPP
+
+  const raw = await gerarTextoIAConversa(system, historico, textoLimpo)
+
+  if (isEscalationSignal(raw)) {
+    return { resposta: "", escalar: true }
+  }
+  return { resposta: raw.trim(), escalar: false }
 }

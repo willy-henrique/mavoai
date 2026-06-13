@@ -1,4 +1,10 @@
-import { gerarRespostaAssistida } from "@/lib/assisted-response"
+import { gerarRespostaWhatsApp, pediuHumano } from "@/lib/assisted-response"
+import {
+  carregarConversa,
+  salvarConversa,
+  marcarHandoff,
+} from "@/lib/whatsapp-memory"
+import { notifyHandoff } from "@/lib/handoff-notifier"
 import {
   enforceRateLimit,
   validateIntegrationHeaders,
@@ -340,10 +346,42 @@ export async function POST(request: Request) {
       }
     })
 
-    // Auto-reply — igual ao MTalk: gera IA, envia (direto ou webhook), retorna no HTTP
+    // Auto-reply — paridade com o MTalk: memória da conversa + handoff + tom conversacional.
     const contactNumber = extractContactNumber(body)
+    // Mensagem vinda do MTalk: ele já respondeu (com memória própria). Aqui o
+    // endpoint serve só de armazenamento/RAG — não responde de novo (evita eco duplo).
+    const ehEcoDoMtalk = sourceSystem === "mtalk"
 
-    if (autoReplyHabilitado()) {
+    if (autoReplyHabilitado() && !ehEcoDoMtalk) {
+      const MSG_HANDOFF =
+        "Já estou te passando para um atendente, tá? Só um instante que alguém continua o atendimento por aqui."
+      const canal = body.canal || "whatsapp"
+
+      // Carrega o histórico da conversa (mesma memória usada pelo MTalk).
+      const conversa = await carregarConversa(ticketId)
+
+      // Já transferido para um humano → o bot fica em silêncio.
+      if (conversa.handoff) {
+        return NextResponse.json({ status: "ok", atendimento_id: atendimentoId, handoff: true })
+      }
+
+      // Dispara a transferência para um atendente humano e devolve a mensagem de aviso.
+      const dispararHandoff = async (motivo: string): Promise<string> => {
+        conversa.messages.push({ role: "user", content: mensagens })
+        await marcarHandoff(ticketId, conversa)
+        notifyHandoff({
+          tenantId,
+          sourceSystem,
+          conversationId: ticketId,
+          platform: canal,
+          queueId: body.queue_id ?? null,
+          cliente: { nome: cliente, telefone: contactNumber ?? "" },
+          summary: `Cliente: ${cliente}. Última mensagem: "${mensagens.slice(0, 280)}".`,
+          reason: motivo,
+        }).catch(() => undefined)
+        return MSG_HANDOFF
+      }
+
       const AUTO_REPLY_TIMEOUT_MS = 30_000
       const ac = new AbortController()
       const timer = setTimeout(() => ac.abort(), AUTO_REPLY_TIMEOUT_MS)
@@ -351,33 +389,52 @@ export async function POST(request: Request) {
       let resposta: string | null = null
 
       try {
-        resposta = await Promise.race([
-          gerarRespostaAssistida(mensagens),
-          new Promise<never>((_, reject) => {
-            ac.signal.addEventListener("abort", () =>
-              reject(new Error("auto-reply timeout"))
-            )
-          }),
-        ])
-        clearTimeout(timer)
+        // Pedido explícito de humano → transfere na hora.
+        if (pediuHumano(mensagens)) {
+          resposta = await dispararHandoff("cliente_pediu_humano")
+          clearTimeout(timer)
+        } else {
+          const resultado = await Promise.race([
+            gerarRespostaWhatsApp(mensagens, cliente, conversa.messages),
+            new Promise<never>((_, reject) => {
+              ac.signal.addEventListener("abort", () =>
+                reject(new Error("auto-reply timeout"))
+              )
+            }),
+          ])
+          clearTimeout(timer)
 
-        // Envia resposta (API direta se number disponível, senão webhook)
-        enviarRespostaParaWillTalk({
-          ticketId,
-          cliente,
-          canal: body.canal || "whatsapp",
-          resposta,
-          number: contactNumber,
-        }).then(() => {
-          registrarLogIngestao("auto_reply_enviado", body, {
-            ticket_id: ticketId,
-            source_system: sourceSystem,
-            via: contactNumber ? "api_direta" : "webhook",
-          }, sourceSystem).catch(() => {})
-        }).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err)
-          logger.warn("auto_reply_envio_erro", { ticketId, error: msg.slice(0, 200) })
-        })
+          if (resultado.escalar) {
+            resposta = await dispararHandoff("ia_nao_resolveu")
+          } else {
+            resposta = resultado.resposta
+            // Salva o turno (cliente + IA) — assim a IA lembra o contexto na próxima mensagem
+            // e não fica se reapresentando nem repetindo perguntas já respondidas.
+            conversa.messages.push({ role: "user", content: mensagens })
+            conversa.messages.push({ role: "assistant", content: resposta })
+            await salvarConversa(ticketId, conversa)
+          }
+        }
+
+        // Envia a resposta (API direta se number disponível, senão webhook)
+        if (resposta) {
+          enviarRespostaParaWillTalk({
+            ticketId,
+            cliente,
+            canal,
+            resposta,
+            number: contactNumber,
+          }).then(() => {
+            registrarLogIngestao("auto_reply_enviado", body, {
+              ticket_id: ticketId,
+              source_system: sourceSystem,
+              via: contactNumber ? "api_direta" : "webhook",
+            }, sourceSystem).catch(() => {})
+          }).catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err)
+            logger.warn("auto_reply_envio_erro", { ticketId, error: msg.slice(0, 200) })
+          })
+        }
 
       } catch (err) {
         clearTimeout(timer)
