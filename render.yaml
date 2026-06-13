@@ -27,8 +27,9 @@ services:
       # IA — Groq
       - key: AI_BASE_URL
         value: https://api.groq.com/openai/v1
+      # Chat forte e rápido (não-reasoning). Máxima qualidade/mais lento: openai/gpt-oss-120b
       - key: AI_CHAT_MODEL
-        value: meta-llama/llama-4-scout-17b-16e-instruct
+        value: llama-3.3-70b-versatile
       - key: AI_CURATOR_MODEL
         value: meta-llama/llama-4-maverick-17b-128e-instruct
       - key: AI_API_KEY

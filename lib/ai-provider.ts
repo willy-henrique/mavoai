@@ -161,6 +161,69 @@ async function callOpenAICompatible(
   throw new Error(`Erro no chat IA apos retentativas [${model}]: ${lastErrorBody}`)
 }
 
+/**
+ * Variante da chamada de chat que aceita um array de mensagens (multi-turno).
+ * Usado pelo atendimento conversacional (WhatsApp) que precisa de histórico.
+ */
+async function callChatMessages(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  temperature = 0.3,
+): Promise<string> {
+  const reasoning = isReasoningModel(model)
+  const timeoutMs = reasoning ? CALL_TIMEOUT_MS_REASONING : CALL_TIMEOUT_MS
+
+  // Modelos de reasoning não aceitam role "system" separado: dobra o system no 1º user.
+  let finalMessages = messages
+  if (reasoning) {
+    const sys = messages.find((m) => m.role === "system")?.content ?? ""
+    const rest = messages.filter((m) => m.role !== "system")
+    finalMessages = sys
+      ? [{ role: "user" as const, content: sys }, ...rest]
+      : rest
+  }
+
+  let lastErrorBody = ""
+  for (let attempt = 0; attempt < CHAT_MAX_RETRIES; attempt++) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    let response: Response
+    try {
+      const body = reasoning
+        ? { model, messages: finalMessages, temperature: 1, max_completion_tokens: 4096 }
+        : { model, messages: finalMessages, temperature, max_tokens: 1024 }
+      response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+    } catch (fetchErr) {
+      clearTimeout(timeoutId)
+      const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
+      throw new Error(`Erro de conexao com provider [${model}]: ${msg}`)
+    } finally {
+      clearTimeout(timeoutId)
+    }
+    if (response.ok) {
+      const data = await response.json()
+      const text = data?.choices?.[0]?.message?.content
+      if (!text || typeof text !== "string") throw new Error("Resposta de chat invalida")
+      return text
+    }
+    lastErrorBody = await response.text()
+    if (response.status === 429 && attempt < CHAT_MAX_RETRIES - 1) {
+      const sec = parseGroqRetrySeconds(lastErrorBody)
+      await sleep(sec != null ? Math.min(Math.ceil(sec * 1000) + 400, 90_000) : Math.min(2500 * 2 ** attempt, 30_000))
+      continue
+    }
+    throw new Error(`Erro no chat IA [${model}]: ${response.status} ${lastErrorBody}`)
+  }
+  throw new Error(`Erro no chat IA apos retentativas [${model}]: ${lastErrorBody}`)
+}
+
 // ─── API pública ───────────────────────────────────────────────────────────────
 
 /**
@@ -171,6 +234,26 @@ export async function gerarTextoIA(system: string, prompt: string): Promise<stri
   const config = await getChatConfig()
   if (!config.apiKey) throw new Error("AI_API_KEY ou GROQ_API_KEY nao configurada")
   return callOpenAICompatible(config.baseUrl, config.apiKey, config.model, system, prompt, 0.2)
+}
+
+/**
+ * Gera resposta conversacional com histórico (multi-turno).
+ * O `system` define a personalidade; `historico` traz os turnos anteriores;
+ * `mensagemAtual` é a nova mensagem do usuário.
+ */
+export async function gerarTextoIAConversa(
+  system: string,
+  historico: Array<{ role: "user" | "assistant"; content: string }>,
+  mensagemAtual: string,
+): Promise<string> {
+  const config = await getChatConfig()
+  if (!config.apiKey) throw new Error("AI_API_KEY ou GROQ_API_KEY nao configurada")
+  const messages = [
+    { role: "system" as const, content: system },
+    ...historico,
+    { role: "user" as const, content: mensagemAtual },
+  ]
+  return callChatMessages(config.baseUrl, config.apiKey, config.model, messages, 0.35)
 }
 
 /**
