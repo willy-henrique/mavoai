@@ -1,6 +1,7 @@
 import { Ratelimit } from "@upstash/ratelimit"
 import { Redis } from "@upstash/redis"
 import { logger } from "@/lib/logger"
+import { getSecret } from "@/lib/secret-store"
 
 type AuthResult =
   | { ok: true; tenantId: string; sourceSystem: string; ingestionId: string; sourceEntityId: string }
@@ -29,7 +30,7 @@ function getHeader(headers: Headers, name: string) {
   return headers.get(name) || headers.get(name.toLowerCase()) || ""
 }
 
-export function validateIntegrationHeaders(request: Request): AuthResult {
+export async function validateIntegrationHeaders(request: Request): Promise<AuthResult> {
   const required = String(process.env.INTEGRATION_AUTH_REQUIRED || "false").toLowerCase() === "true"
   const sourceSystem = getHeader(request.headers, "X-Source-System") || "willtalk"
   const sourceEntityId = getHeader(request.headers, "X-Source-Entity-Id") || "unknown"
@@ -40,8 +41,9 @@ export function validateIntegrationHeaders(request: Request): AuthResult {
     return { ok: true, tenantId, sourceSystem, ingestionId, sourceEntityId }
   }
 
+  // Token editável pelo painel (banco → env).
   const auth = getHeader(request.headers, "Authorization")
-  const expected = process.env.CEREBRO_INGEST_TOKEN || ""
+  const expected = await getSecret("CEREBRO_INGEST_TOKEN")
   if (!auth.startsWith("Bearer ") || !expected || auth.slice(7) !== expected) {
     return { ok: false, status: 401, error: "unauthorized_integration" }
   }

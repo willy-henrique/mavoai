@@ -84,7 +84,7 @@ const requestSchema = z.object({
  * WillTalk, MTalk e outros canais enviam estado + filas; este endpoint devolve reply_text e próximo estado.
  */
 export async function POST(request: Request) {
-  const auth = validateIntegrationHeaders(request)
+  const auth = await validateIntegrationHeaders(request)
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }

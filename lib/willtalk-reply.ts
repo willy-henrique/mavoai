@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { getSecret } from "@/lib/secret-store"
 
 // ─── Modo direto (igual ao MTalk) ─────────────────────────────────────────────
 // Se WILLTALK_API_URL + WILLTALK_API_TOKEN estiverem configurados,
@@ -21,21 +22,20 @@ interface WillTalkWebhookInput {
 export async function enviarRespostaParaWillTalk(
   input: WillTalkWebhookInput & { number?: string },
 ): Promise<void> {
-  const apiUrl   = process.env.WILLTALK_API_URL
-  const apiToken = process.env.WILLTALK_API_TOKEN
+  // Credenciais editáveis pelo painel (banco → env).
+  const apiUrl   = await getSecret("WILLTALK_API_URL")
+  const apiToken = await getSecret("WILLTALK_API_TOKEN")
 
   // Modo direto — mesmo padrão do MTalk
   if (apiUrl && apiToken && input.number) {
-    return _enviarDireto({ number: input.number, content: input.resposta, saveOnTicket: true })
+    return _enviarDireto({ number: input.number, content: input.resposta, saveOnTicket: true }, apiUrl, apiToken)
   }
 
   // Fallback: webhook legado
   return _enviarWebhook(input)
 }
 
-async function _enviarDireto(input: WillTalkDirectInput): Promise<void> {
-  const apiUrl   = process.env.WILLTALK_API_URL!
-  const apiToken = process.env.WILLTALK_API_TOKEN!
+async function _enviarDireto(input: WillTalkDirectInput, apiUrl: string, apiToken: string): Promise<void> {
   const endpoint = `${apiUrl.replace(/\/$/, "")}/backend/api/messages/send`
 
   const response = await fetch(endpoint, {
@@ -92,13 +92,16 @@ async function _enviarWebhook(input: WillTalkWebhookInput): Promise<void> {
   logger.info("willtalk_reply_webhook", { ticketId: input.ticketId })
 }
 
-export function autoReplyHabilitado(): boolean {
-  // Habilitado se: flag explícita true, OU API direta configurada, OU webhook configurado
+export async function autoReplyHabilitado(): Promise<boolean> {
+  // Habilitado se: flag explícita true, OU credenciais da API direta configuradas
+  // (banco → env). O flag continua sendo lido do ambiente.
   if (process.env.WILLTALK_AUTO_REPLY_ENABLED === "true") return true
-  if (process.env.WILLTALK_API_URL && process.env.WILLTALK_API_TOKEN) return true
+  const apiUrl   = await getSecret("WILLTALK_API_URL")
+  const apiToken = await getSecret("WILLTALK_API_TOKEN")
+  if (apiUrl && apiToken) return true
   return false
 }
 
-export function willtalkReplyHabilitado(): boolean {
+export async function willtalkReplyHabilitado(): Promise<boolean> {
   return autoReplyHabilitado()
 }

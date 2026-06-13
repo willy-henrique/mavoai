@@ -125,6 +125,41 @@ export async function saveModelConfig(cfg: ModelConfig): Promise<void> {
   invalidateConfigCache()
 }
 
+// ─── Segredos (tokens/chaves editáveis pelo painel) ─────────────────────────────
+
+/**
+ * Salva segredos no banco como `secret.<NOME>`.
+ * Valores em branco ou mascarados ("••••...") são ignorados (mantém o atual).
+ */
+export async function saveSecrets(secrets: Record<string, string>): Promise<void> {
+  const entries: Array<[string, string]> = []
+  for (const [name, rawVal] of Object.entries(secrets)) {
+    const val = (rawVal ?? "").trim()
+    if (!val || val.startsWith("••••")) continue
+    entries.push([`secret.${name}`, val])
+  }
+  if (entries.length === 0) return
+
+  for (const [key, value] of entries) {
+    await query(
+      `INSERT INTO public.system_config (key, value, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [key, value],
+    )
+  }
+
+  logger.info("secrets_saved", { keys: entries.map(([k]) => k) })
+  invalidateConfigCache()
+}
+
+/** Remove um segredo do banco — volta a valer a variável de ambiente. */
+export async function deleteSecret(name: string): Promise<void> {
+  await query("DELETE FROM public.system_config WHERE key = $1", [`secret.${name}`])
+  logger.info("secret_deleted", { key: `secret.${name}` })
+  invalidateConfigCache()
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function maskKey(key: string): string {

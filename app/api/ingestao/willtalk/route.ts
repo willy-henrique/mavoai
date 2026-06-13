@@ -152,7 +152,7 @@ export async function POST(request: Request) {
     | null = null
 
   try {
-    const auth = validateIntegrationHeaders(request)
+    const auth = await validateIntegrationHeaders(request)
     if (!auth.ok) {
       return NextResponse.json({ error: auth.error }, { status: auth.status })
     }
@@ -352,7 +352,7 @@ export async function POST(request: Request) {
     // endpoint serve só de armazenamento/RAG — não responde de novo (evita eco duplo).
     const ehEcoDoMtalk = sourceSystem === "mtalk"
 
-    if (autoReplyHabilitado() && !ehEcoDoMtalk) {
+    if ((await autoReplyHabilitado()) && !ehEcoDoMtalk) {
       const MSG_HANDOFF =
         "Já estou te passando para um atendente, tá? Só um instante que alguém continua o atendimento por aqui."
       const canal = body.canal || "whatsapp"

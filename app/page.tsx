@@ -9,8 +9,10 @@ import {
   Building2,
   Command,
   Database,
+  KeyRound,
   LayoutDashboard,
   List,
+  LogOut,
   Network,
   Plus,
   Search,
@@ -28,6 +30,7 @@ import { GroqMotorStrip } from "@/components/groq-motor-strip"
 import { HubPanel } from "@/components/hub-panel"
 import { PlatformasPanel } from "@/components/plataformas-panel"
 import { SearchConsole } from "@/components/search-console"
+import { SecretsPanel } from "@/components/secrets-panel"
 import { SettingsPanel } from "@/components/settings-panel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -84,6 +87,12 @@ const NAV_TABS = [
     icon: Building2,
   },
   {
+    value: "tokens",
+    label: "Tokens",
+    description: "Chaves & segredos",
+    icon: KeyRound,
+  },
+  {
     value: "configuracoes",
     label: "Configurações",
     description: "Operação",
@@ -99,6 +108,14 @@ export default function Home() {
 
   const handleAtendimentoCriado = () => {
     setRefreshKey((prev) => prev + 1)
+  }
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/admin/logout", { method: "POST" })
+    } finally {
+      window.location.href = "/login"
+    }
   }
 
   const handleGlobalSearch = useCallback((value: string) => {
@@ -234,11 +251,20 @@ export default function Home() {
                   admin
                 </span>
               </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-lg text-slate-600 hover:text-red-600"
+                title="Sair"
+                onClick={handleLogout}
+              >
+                <LogOut className="size-4" />
+              </Button>
             </div>
           </div>
 
           <div className="border-t border-slate-100 px-4 py-2 lg:hidden">
-            <TabsList className="grid h-auto w-full grid-cols-9 gap-1 rounded-lg bg-slate-100 p-1">
+            <TabsList className="grid h-auto w-full grid-cols-10 gap-1 rounded-lg bg-slate-100 p-1">
               {NAV_TABS.map(({ value, label, icon: Icon }) => (
                 <TabsTrigger
                   key={value}
@@ -328,6 +354,16 @@ export default function Home() {
                 description="Cadastre empresas e importe o conhecimento de cada uma para o Cérebro."
               />
               <EmpresasPanel onNavigateToCerebro={() => setActiveTab("cerebro")} />
+            </TabsContent>
+
+            <TabsContent value="tokens" className="mt-0">
+              <WorkspaceHeader
+                icon={KeyRound}
+                label="Credenciais"
+                title="Tokens & Chaves"
+                description="Controle total dos tokens e chaves do Mavo AI, com efeito imediato."
+              />
+              <SecretsPanel />
             </TabsContent>
 
             <TabsContent value="configuracoes" className="mt-0">

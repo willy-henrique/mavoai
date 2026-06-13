@@ -16,7 +16,7 @@ import { NextResponse } from "next/server"
  */
 export async function POST(request: Request) {
   try {
-    const auth = validateIntegrationHeaders(request)
+    const auth = await validateIntegrationHeaders(request)
     if (!auth.ok) {
       return NextResponse.json({ error: auth.error }, { status: auth.status })
     }

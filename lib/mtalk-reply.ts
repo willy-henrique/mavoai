@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { getSecret } from "@/lib/secret-store"
 
 // MTalk API: POST https://s11.mtalk.com.br:443/backend/api/messages/send
 // Auth: Authorization: Bearer <TOKEN>
@@ -11,8 +12,9 @@ interface MtalkReplyInput {
 }
 
 export async function enviarRespostaParaMTalk(input: MtalkReplyInput): Promise<void> {
-  const baseUrl = process.env.MTALK_BASE_URL
-  const token = process.env.MTALK_API_TOKEN
+  // Credenciais editáveis pelo painel (banco → env).
+  const baseUrl = await getSecret("MTALK_BASE_URL")
+  const token = await getSecret("MTALK_API_TOKEN")
 
   if (!baseUrl || !token) {
     throw new Error("MTALK_BASE_URL e MTALK_API_TOKEN sao obrigatorios")
@@ -41,10 +43,9 @@ export async function enviarRespostaParaMTalk(input: MtalkReplyInput): Promise<v
   logger.info("mtalk_reply_enviado", { number: input.number })
 }
 
-export function mtalkReplyHabilitado(): boolean {
-  return !!(
-    process.env.MTALK_BASE_URL &&
-    process.env.MTALK_API_TOKEN &&
-    process.env.MTALK_AUTO_REPLY_ENABLED === "true"
-  )
+export async function mtalkReplyHabilitado(): Promise<boolean> {
+  if (process.env.MTALK_AUTO_REPLY_ENABLED !== "true") return false
+  const baseUrl = await getSecret("MTALK_BASE_URL")
+  const token = await getSecret("MTALK_API_TOKEN")
+  return !!(baseUrl && token)
 }

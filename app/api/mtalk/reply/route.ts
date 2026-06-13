@@ -12,6 +12,7 @@
  */
 
 import { gerarRespostaAssistida } from "@/lib/assisted-response"
+import { getSecret } from "@/lib/secret-store"
 import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 
@@ -60,8 +61,8 @@ export async function POST(request: Request) {
       if (firstKey) replied.delete(firstKey)
     }
 
-    const mtalkBase = process.env.MTALK_BASE_URL
-    const sendToken = process.env.MTALK_API_TOKEN
+    const mtalkBase = await getSecret("MTALK_BASE_URL")
+    const sendToken = await getSecret("MTALK_API_TOKEN")
 
     if (!mtalkBase || !sendToken) {
       return NextResponse.json({ error: "MTALK_BASE_URL ou MTALK_API_TOKEN não configurados" }, { status: 500, headers: CORS })

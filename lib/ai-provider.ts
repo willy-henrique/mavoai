@@ -1,5 +1,6 @@
 import { GROQ_GPT_OSS_120B, GROQ_LLAMA4_SCOUT_INSTRUCT } from "@/lib/llm-defaults"
 import { getSystemConfig } from "@/lib/system-config-store"
+import { getSecret } from "@/lib/secret-store"
 import { detectProvider } from "@/lib/provider-presets"
 
 /** Padrão do produto: Groq (OpenAI-compatible). */
@@ -51,12 +52,13 @@ function getGroqApiKey(): string {
 
 /**
  * Resolve a API key correta para um dado base_url.
- * Prioridade: env var do provider → AI_API_KEY global.
+ * Prioridade: segredo do provider (banco → env) → AI_API_KEY global.
+ * Ex.: OpenRouter e Google podem ser editados pelo painel (secret-store).
  */
-function resolveApiKeyForUrl(baseUrl: string): string {
+async function resolveApiKeyForUrl(baseUrl: string): Promise<string> {
   const provider = detectProvider(baseUrl)
   if (provider) {
-    const key = process.env[provider.env_key]
+    const key = await getSecret(provider.env_key)
     if (key) return key
   }
   return getGroqApiKey()
@@ -275,7 +277,7 @@ export async function gerarTextoIAComAgente(
   const globalConfig = await getChatConfig()
   const baseUrl = agentBaseUrl ?? globalConfig.baseUrl
   const model   = agentModel   ?? globalConfig.model
-  const apiKey  = resolveApiKeyForUrl(baseUrl) || globalConfig.apiKey
+  const apiKey  = (await resolveApiKeyForUrl(baseUrl)) || globalConfig.apiKey
 
   if (!apiKey) throw new Error(`API key nao encontrada para provider: ${baseUrl}`)
 

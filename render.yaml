@@ -78,6 +78,13 @@ services:
         sync: false
       - key: INTEGRATION_AUTH_REQUIRED
         value: "true"
+
+      # Login do painel admin (senha única) — defina no dashboard do Render.
+      # Sem ADMIN_PASSWORD o painel fica trancado (fail-closed).
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_SESSION_SECRET
+        sync: false
       - key: API_RATE_LIMIT_PER_MINUTE
         value: "60"
 

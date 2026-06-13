@@ -8,49 +8,49 @@ function makeRequest(headers: Record<string, string> = {}): Request {
   })
 }
 
-describe("validateIntegrationHeaders", () => {
+describe("validateIntegrationHeaders", async () => {
   afterEach(() => {
     delete process.env.INTEGRATION_AUTH_REQUIRED
     delete process.env.CEREBRO_INGEST_TOKEN
   })
 
-  it("retorna ok quando autenticação está desabilitada", () => {
+  it("retorna ok quando autenticação está desabilitada", async () => {
     process.env.INTEGRATION_AUTH_REQUIRED = "false"
     const req = makeRequest()
-    const result = validateIntegrationHeaders(req)
+    const result = await validateIntegrationHeaders(req)
     expect(result.ok).toBe(true)
   })
 
-  it("usa defaults quando headers opcionais estão ausentes", () => {
+  it("usa defaults quando headers opcionais estão ausentes", async () => {
     process.env.INTEGRATION_AUTH_REQUIRED = "false"
     const req = makeRequest()
-    const result = validateIntegrationHeaders(req)
+    const result = await validateIntegrationHeaders(req)
     if (!result.ok) throw new Error("deveria ser ok")
     expect(result.tenantId).toBe("default")
     expect(result.sourceSystem).toBe("willtalk")
   })
 
-  it("retorna 401 quando autenticação está habilitada e Bearer está ausente", () => {
+  it("retorna 401 quando autenticação está habilitada e Bearer está ausente", async () => {
     process.env.INTEGRATION_AUTH_REQUIRED = "true"
     process.env.CEREBRO_INGEST_TOKEN = "meu-token-secreto"
     const req = makeRequest()
-    const result = validateIntegrationHeaders(req)
+    const result = await validateIntegrationHeaders(req)
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error("deveria ser erro")
     expect(result.status).toBe(401)
   })
 
-  it("retorna 401 quando token está errado", () => {
+  it("retorna 401 quando token está errado", async () => {
     process.env.INTEGRATION_AUTH_REQUIRED = "true"
     process.env.CEREBRO_INGEST_TOKEN = "token-correto"
     const req = makeRequest({ Authorization: "Bearer token-errado" })
-    const result = validateIntegrationHeaders(req)
+    const result = await validateIntegrationHeaders(req)
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error("deveria ser erro")
     expect(result.status).toBe(401)
   })
 
-  it("retorna ok quando token está correto", () => {
+  it("retorna ok quando token está correto", async () => {
     process.env.INTEGRATION_AUTH_REQUIRED = "true"
     process.env.CEREBRO_INGEST_TOKEN = "token-valido-123"
     const req = makeRequest({
@@ -58,23 +58,23 @@ describe("validateIntegrationHeaders", () => {
       "X-Tenant-Id": "empresa-abc",
       "X-Source-System": "erp-x",
     })
-    const result = validateIntegrationHeaders(req)
+    const result = await validateIntegrationHeaders(req)
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error("deveria ser ok")
     expect(result.tenantId).toBe("empresa-abc")
     expect(result.sourceSystem).toBe("erp-x")
   })
 
-  it("lê headers case-insensitive", () => {
+  it("lê headers case-insensitive", async () => {
     process.env.INTEGRATION_AUTH_REQUIRED = "false"
     const req = makeRequest({ "x-tenant-id": "tenant-lower" })
-    const result = validateIntegrationHeaders(req)
+    const result = await validateIntegrationHeaders(req)
     if (!result.ok) throw new Error("deveria ser ok")
     expect(result.tenantId).toBe("tenant-lower")
   })
 })
 
-describe("enforceRateLimit", () => {
+describe("enforceRateLimit", async () => {
   afterEach(() => {
     delete process.env.INTEGRATION_RATE_LIMIT_PER_MIN
   })
@@ -103,7 +103,7 @@ describe("enforceRateLimit", () => {
   })
 })
 
-describe("registerDedupKey", () => {
+describe("registerDedupKey", async () => {
   it("retorna duplicated=false na primeira inserção", async () => {
     const supabase = {
       from: vi.fn().mockReturnValue({
