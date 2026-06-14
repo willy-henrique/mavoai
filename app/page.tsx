@@ -30,6 +30,7 @@ import { EmpresasPanel } from "@/components/empresas-panel"
 import { GroqMotorStrip } from "@/components/groq-motor-strip"
 import { HubPanel } from "@/components/hub-panel"
 import { PlatformasPanel } from "@/components/plataformas-panel"
+import { KnowledgeUpload } from "@/components/knowledge-upload"
 import { LogsPanel } from "@/components/logs-panel"
 import { ModelCard } from "@/components/model-card"
 import { SearchConsole } from "@/components/search-console"
@@ -309,10 +310,13 @@ export default function Home() {
               <WorkspaceHeader
                 icon={Plus}
                 label="Registro"
-                title="Cadastrar atendimento"
-                description="Entrada manual de casos para alimentar o Cérebro."
+                title="Cadastrar & Treinar"
+                description="Alimente o Cérebro: suba documentos para treinar o RAG ou registre um atendimento manual."
               />
-              <AtendimentoForm onSuccess={handleAtendimentoCriado} />
+              <div className="space-y-5">
+                <KnowledgeUpload onTrained={handleAtendimentoCriado} />
+                <AtendimentoForm onSuccess={handleAtendimentoCriado} />
+              </div>
             </TabsContent>
 
             <TabsContent value="atendimentos" className="mt-0">

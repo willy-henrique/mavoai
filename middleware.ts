@@ -25,7 +25,12 @@ export async function middleware(req: NextRequest) {
   const ok = await verifySessionToken(req.cookies.get(ADMIN_COOKIE)?.value)
 
   // APIs sensíveis → exige sessão OU o token interno (hop servidor→servidor dos BFFs).
-  if (pathname.startsWith("/api/config") || pathname.startsWith("/api/admin")) {
+  // /api/knowledge/* = treinamento do RAG (upload/indexação) — só admin.
+  if (
+    pathname.startsWith("/api/config") ||
+    pathname.startsWith("/api/admin") ||
+    pathname.startsWith("/api/knowledge")
+  ) {
     if (ok) return NextResponse.next()
     const auth = req.headers.get("authorization") || ""
     const internal = process.env.CEREBRO_INTERNAL_TOKEN || ""
@@ -45,5 +50,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/api/config/:path*", "/api/admin/:path*"],
+  matcher: ["/", "/api/config/:path*", "/api/admin/:path*", "/api/knowledge/:path*"],
 }
