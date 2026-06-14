@@ -51,6 +51,18 @@ function calcularScoreLexical(textoBase: string, termos: string[]) {
   return matches / termos.length
 }
 
+/**
+ * Detecta casos auto-curados SEM solução real (ex.: "Não aplicada", "Não foi
+ * possível determinar a solução"). Eles poluem o RAG: têm boa similaridade mas
+ * não ensinam nada — e fazem a IA achar que não há solução. Descartamos do contexto.
+ */
+function solucaoInutil(s: string | null): boolean {
+  if (!s) return true
+  const t = s.trim().toLowerCase()
+  if (t.length < 15) return true
+  return /n[aã]o\s+(aplic|foi\s+poss[ií]vel|detalh|informad|identific|h[aá]\s+solu|consta)/.test(t)
+}
+
 export async function buscarSemantica(
   texto: string,
   limite = 3,
@@ -59,14 +71,16 @@ export async function buscarSemantica(
   try {
     const embedding = await gerarEmbedding(texto)
     const vector = embeddingParaVector(embedding)
+    // Busca mais do que o necessário para poder descartar casos sem solução útil.
+    const overfetch = Math.min(Math.max(limite * 4, 12), 40)
     const result = await query(
       "SELECT * FROM buscar_atendimentos_semanticos($1::vector, $2::int, $3::text)",
-      [vector, limite, tenantId ?? null]
+      [vector, overfetch, tenantId ?? null]
     )
 
     if (Array.isArray(result.rows)) {
       const termos = normalizarTermosBusca(texto)
-      return result.rows
+      const mapped = result.rows
         .map((row: any) => {
           const base = [row.resumo_problema, row.problema, row.causa, row.solucao]
             .filter(Boolean).join(" ")
@@ -85,6 +99,10 @@ export async function buscarSemantica(
           }
         })
         .sort((a, b) => b.similaridade - a.similaridade)
+
+      // Prioriza casos COM solução real; só cai nos vazios se não sobrar nada.
+      const uteis = mapped.filter((r) => !solucaoInutil(r.solucao))
+      return (uteis.length > 0 ? uteis : mapped).slice(0, limite)
     }
   } catch (error) {
     logger.warn("busca_vetorial_indisponivel", {
