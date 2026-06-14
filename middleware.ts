@@ -24,10 +24,13 @@ export async function middleware(req: NextRequest) {
 
   const ok = await verifySessionToken(req.cookies.get(ADMIN_COOKIE)?.value)
 
-  // APIs sensíveis → 401 em JSON quando não autenticado.
+  // APIs sensíveis → exige sessão OU o token interno (hop servidor→servidor dos BFFs).
   if (pathname.startsWith("/api/config") || pathname.startsWith("/api/admin")) {
-    if (!ok) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-    return NextResponse.next()
+    if (ok) return NextResponse.next()
+    const auth = req.headers.get("authorization") || ""
+    const internal = process.env.CEREBRO_INTERNAL_TOKEN || ""
+    if (internal && auth === `Bearer ${internal}`) return NextResponse.next()
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   }
 
   // Página do painel → redireciona para /login quando não autenticado.

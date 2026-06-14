@@ -15,6 +15,7 @@ import {
   LogOut,
   Network,
   Plus,
+  ScrollText,
   Search,
   Settings2,
   ShieldCheck,
@@ -29,6 +30,8 @@ import { EmpresasPanel } from "@/components/empresas-panel"
 import { GroqMotorStrip } from "@/components/groq-motor-strip"
 import { HubPanel } from "@/components/hub-panel"
 import { PlatformasPanel } from "@/components/plataformas-panel"
+import { LogsPanel } from "@/components/logs-panel"
+import { ModelCard } from "@/components/model-card"
 import { SearchConsole } from "@/components/search-console"
 import { SecretsPanel } from "@/components/secrets-panel"
 import { SettingsPanel } from "@/components/settings-panel"
@@ -89,8 +92,14 @@ const NAV_TABS = [
   {
     value: "tokens",
     label: "Tokens",
-    description: "Chaves & segredos",
+    description: "Chaves & modelos",
     icon: KeyRound,
+  },
+  {
+    value: "logs",
+    label: "Logs",
+    description: "Atividade da IA",
+    icon: ScrollText,
   },
   {
     value: "configuracoes",
@@ -264,7 +273,7 @@ export default function Home() {
           </div>
 
           <div className="border-t border-slate-100 px-4 py-2 lg:hidden">
-            <TabsList className="grid h-auto w-full grid-cols-10 gap-1 rounded-lg bg-slate-100 p-1">
+            <TabsList className="grid h-auto w-full grid-cols-11 gap-1 rounded-lg bg-slate-100 p-1">
               {NAV_TABS.map(({ value, label, icon: Icon }) => (
                 <TabsTrigger
                   key={value}
@@ -361,9 +370,22 @@ export default function Home() {
                 icon={KeyRound}
                 label="Credenciais"
                 title="Tokens & Chaves"
-                description="Controle total dos tokens e chaves do Mavo AI, com efeito imediato."
+                description="Modelo de IA, tokens e chaves do Mavo AI — com efeito imediato."
               />
-              <SecretsPanel />
+              <div className="space-y-5">
+                <ModelCard />
+                <SecretsPanel />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="logs" className="mt-0">
+              <WorkspaceHeader
+                icon={ScrollText}
+                label="Observabilidade"
+                title="Logs da IA"
+                description="Acompanhe o que a IA recebeu, respondeu e onde deu erro — em tempo real."
+              />
+              <LogsPanel />
             </TabsContent>
 
             <TabsContent value="configuracoes" className="mt-0">
