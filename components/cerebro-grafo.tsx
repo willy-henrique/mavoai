@@ -29,10 +29,10 @@ type SimLink = GrafoLinkData & {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const BG = "#0a0c0f"
-const EDGE_COLOR_DIM = "rgba(148,163,184,0.09)"
-const EDGE_COLOR_HI = "rgba(148,163,184,0.45)"
-const NODE_DEFAULT = "rgba(226,232,240,0.88)"
-const LABEL_DEFAULT = "rgba(148,163,184,0.75)"
+const EDGE_COLOR_DIM = "rgba(148,163,184,0.13)"
+const EDGE_COLOR_HI = "rgba(226,232,240,0.55)"
+const EDGE_COLOR_FADED = "rgba(148,163,184,0.04)"
+const LABEL_DEFAULT = "rgba(203,213,225,0.8)"
 const LABEL_HI = "#ffffff"
 
 const GROUP_PALETTE: Record<string, string> = {
@@ -142,19 +142,28 @@ export function CerebroGrafo() {
       lk.tgtNode = nodeMap.get(lk.target)
     }
 
+    // Nó em foco (hover ou selecionado) + vizinhos diretos, para o modo de destaque.
+    const focusNode = hov ?? sel
+    let focusSet: Set<string> | null = null
+    if (focusNode) {
+      focusSet = new Set<string>([focusNode.id])
+      for (const lk of links.current) {
+        if (lk.source === focusNode.id) focusSet.add(lk.target)
+        else if (lk.target === focusNode.id) focusSet.add(lk.source)
+      }
+    }
+
     // ── Edges ────────────────────────────────────────────────────────────────
     for (const lk of links.current) {
       const s = lk.srcNode
       const t = lk.tgtNode
       if (!s || !t) continue
-      const hi =
-        hov && (hov.id === s.id || hov.id === t.id) ||
-        sel && (sel.id === s.id || sel.id === t.id)
+      const touchesFocus = focusNode ? (lk.source === focusNode.id || lk.target === focusNode.id) : false
       ctx.beginPath()
       ctx.moveTo(s.x, s.y)
       ctx.lineTo(t.x, t.y)
-      ctx.strokeStyle = hi ? EDGE_COLOR_HI : EDGE_COLOR_DIM
-      ctx.lineWidth = hi ? 1.2 : 0.7
+      ctx.strokeStyle = touchesFocus ? EDGE_COLOR_HI : focusNode ? EDGE_COLOR_FADED : EDGE_COLOR_DIM
+      ctx.lineWidth = touchesFocus ? 1.3 : 0.7
       ctx.stroke()
     }
 
@@ -162,12 +171,17 @@ export function CerebroGrafo() {
     for (const n of nodes.current) {
       const isHov = hov?.id === n.id
       const isSel = sel?.id === n.id
+      const active = isHov || isSel
       const color = GROUP_PALETTE[n.group] ?? (n.group.startsWith("#") ? n.group : GROUP_PALETTE.geral)
+      // Em modo foco, atenua quem não é o nó em foco nem vizinho direto.
+      const dim = focusSet ? !focusSet.has(n.id) : false
 
-      if (isHov || isSel) {
+      ctx.globalAlpha = dim ? 0.18 : 1
+
+      if (active) {
         // Glow
         const grd = ctx.createRadialGradient(n.x, n.y, n.radius * 0.5, n.x, n.y, n.radius * 3.5)
-        grd.addColorStop(0, color + "55")
+        grd.addColorStop(0, color + "66")
         grd.addColorStop(1, color + "00")
         ctx.beginPath()
         ctx.arc(n.x, n.y, n.radius * 3.5, 0, Math.PI * 2)
@@ -175,21 +189,27 @@ export function CerebroGrafo() {
         ctx.fill()
       }
 
-      // Circle
+      // Círculo — SEMPRE com a cor do grupo
       ctx.beginPath()
       ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2)
-      ctx.fillStyle = isHov || isSel ? color : NODE_DEFAULT
+      ctx.fillStyle = color
       ctx.fill()
+      // Borda: branca quando ativo (destaque); escura sutil em repouso (definição no fundo)
+      ctx.lineWidth = active ? 2 : 1
+      ctx.strokeStyle = active ? "#ffffff" : "rgba(10,12,15,0.55)"
+      ctx.stroke()
 
       // Label
-      const showLabel = scale > 0.45 || isHov || isSel
+      const showLabel = scale > 0.45 || active
       if (showLabel) {
         const fs = Math.max(9, Math.min(12, 10 / scale))
-        ctx.font = `${isHov || isSel ? "600" : "400"} ${fs}px Inter, system-ui, sans-serif`
-        ctx.fillStyle = isHov || isSel ? LABEL_HI : LABEL_DEFAULT
+        ctx.font = `${active ? "600" : "400"} ${fs}px Inter, system-ui, sans-serif`
+        ctx.fillStyle = active ? LABEL_HI : LABEL_DEFAULT
         ctx.textAlign = "center"
         ctx.fillText(n.label, n.x, n.y + n.radius + fs + 3)
       }
+
+      ctx.globalAlpha = 1
     }
 
     ctx.restore()
