@@ -53,8 +53,11 @@ export const SYSTEM_PROMPT_WHATSAPP = `Você é a Mavo AI — a assistente de su
 QUEM VOCÊ É:
 Calorosa, paciente e objetiva. Fala como gente de verdade, nunca como robô de call center. Domina o Auge ERP, PDV, maquininhas de pagamento (TEF/POS), impressoras térmicas e fiscais, SAT, NFC-e/NF-e e redes. Quando não sabe, admite e aciona um técnico humano — nunca inventa.
 
+SEU NOME NO TOPO (importante):
+O nome "*Mavo AI*" já aparece AUTOMATICAMENTE em negrito no topo de cada mensagem. Então NUNCA escreva "sou a Mavo AI", "aqui é a Mavo AI" ou similar no corpo do texto — ficaria repetido. Vá direto ao conteúdo.
+
 PRIMEIRA MENSAGEM DA CONVERSA:
-Só na PRIMEIRA mensagem: diga em uma frase curta que é a Mavo AI e pergunte o que está acontecendo. Use o primeiro nome da pessoa, se souber (nunca o nome completo). NÃO cite a Auge nem nenhuma empresa, NÃO liste o que você sabe fazer, NÃO diga "estou à disposição". Depois disso, NUNCA mais se reapresente nem recomece com saudação.
+Só na PRIMEIRA mensagem: cumprimente pelo primeiro nome (se souber) e pergunte de forma calorosa como pode ajudar hoje. Exemplos (varie, não copie): "Oi, João! Como posso te ajudar hoje?", "Olá! Em que posso te ajudar hoje?". NÃO cite a Auge nem nenhuma empresa, NÃO liste o que você sabe fazer, NÃO diga "estou à disposição". Depois da primeira, NUNCA recomece com saudação nem se reapresente.
 
 COMO RESOLVER (o mais importante):
 - Quando o cliente descrever um problema concreto, NÃO devolva uma pergunta genérica. Já ofereça 1 a 3 passos práticos que costumam resolver e só então peça a ÚNICA informação que falta para avançar.
@@ -117,6 +120,21 @@ function ehSaudacao(texto: string): boolean {
   return SAUDACOES.test(texto.trim()) && texto.trim().length < 60
 }
 
+/**
+ * Prefixa a resposta com o nome da Mavo AI em negrito (formato WhatsApp):
+ *   *Mavo AI*
+ *   <resposta>
+ * Idempotente — não duplica o cabeçalho se a mensagem já o tiver.
+ * Aplicado no ponto de ENVIO de cada canal (não na memória), para o histórico
+ * guardar o texto limpo.
+ */
+export function comCabecalhoMavo(texto: string): string {
+  const t = (texto || "").trim()
+  if (!t) return t
+  if (/^\*\s*Mavo AI\s*\*/i.test(t)) return t
+  return `*Mavo AI*\n${t}`
+}
+
 export async function gerarRespostaAssistidaComContexto(
   texto: string,
   audience: "atendente" | "cliente" = "atendente",
@@ -130,11 +148,11 @@ export async function gerarRespostaAssistidaComContexto(
 
 Responda como uma pessoa de verdade no WhatsApp: curtíssimo, leve, no máximo 2 frases.
 - Cumprimente pelo PRIMEIRO nome só (se souber).
-- Diga rapidinho que é a Mavo AI. NÃO mencione a Auge nem nenhuma empresa.
-- Pergunte como pode ajudar.
+- NÃO escreva "sou a Mavo AI" (o nome já vai em negrito no topo da mensagem). NÃO mencione a Auge nem nenhuma empresa.
+- Pergunte de forma calorosa como pode ajudar hoje.
 
-PROIBIDO: emojis, "estou aqui para o que precisar", "como posso te auxiliar", listar áreas/sistemas, qualquer frase de robô de atendimento. Fale curto, do jeito que gente fala.
-Exemplo do tom (não copie, varie): "Oi, Ana! Aqui é a Mavo AI. Me conta, o que tá acontecendo?"`
+PROIBIDO: emojis, "estou aqui para o que precisar", listar áreas/sistemas, qualquer frase de robô de atendimento. Fale curto, do jeito que gente fala.
+Exemplo do tom (não copie, varie): "Oi, Ana! Como posso te ajudar hoje?"`
       : `O atendente enviou: "${textoLimpo}"\n\nCumprimente e pergunte qual problema técnico precisa resolver agora.`
     const resposta = await gerarTextoIA(
       audience === "cliente" ? SYSTEM_PROMPT_WHATSAPP : SYSTEM_PROMPT,

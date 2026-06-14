@@ -8,7 +8,7 @@
  *  3. Se login falha (ERR_MAX_ACTIVE_DESKTOP_SESSIONS), usa POST manual como fallback
  */
 
-import { gerarRespostaWhatsApp } from "@/lib/assisted-response"
+import { comCabecalhoMavo, gerarRespostaWhatsApp } from "@/lib/assisted-response"
 import type { ChatTurn } from "@/lib/whatsapp-memory"
 import { getSecret } from "@/lib/secret-store"
 import { logger } from "@/lib/logger"
@@ -226,7 +226,7 @@ export async function GET() {
       const sendResp = await fetch(`${mtalkBase}/backend/api/messages/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${sendToken}` },
-        body: JSON.stringify({ number: contactNumber, body: resposta, saveOnTicket: true }),
+        body: JSON.stringify({ number: contactNumber, body: comCabecalhoMavo(resposta), saveOnTicket: true }),
       })
 
       if (!sendResp.ok) {

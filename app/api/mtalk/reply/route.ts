@@ -11,7 +11,7 @@
  * Não precisa de JWT — o browser lê os tickets, o Cerebro só responde.
  */
 
-import { gerarRespostaWhatsApp, pediuHumano } from "@/lib/assisted-response"
+import { comCabecalhoMavo, gerarRespostaWhatsApp, pediuHumano } from "@/lib/assisted-response"
 import { carregarConversa, salvarConversa, marcarHandoff } from "@/lib/whatsapp-memory"
 import { notifyHandoff } from "@/lib/handoff-notifier"
 import { getSecret } from "@/lib/secret-store"
@@ -109,7 +109,7 @@ export async function POST(request: Request) {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${sendToken}`,
       },
-      body: JSON.stringify({ number: contactNumber, body: resposta, saveOnTicket: true }),
+      body: JSON.stringify({ number: contactNumber, body: comCabecalhoMavo(resposta), saveOnTicket: true }),
     })
 
     if (!sendResp.ok) {

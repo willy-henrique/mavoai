@@ -24,6 +24,7 @@
  */
 
 import {
+  comCabecalhoMavo,
   gerarRespostaWhatsApp,
   pediuHumano,
   SYSTEM_PROMPT_WHATSAPP,
@@ -42,10 +43,10 @@ import { after } from "next/server"
 
 // Formato de resposta que o MTalk espera
 function mtalkResponse(texto: string) {
-  return NextResponse.json([{ type: "text", content: texto }])
+  return NextResponse.json([{ type: "text", content: comCabecalhoMavo(texto) }])
 }
 function mtalkError(texto: string) {
-  return NextResponse.json([{ type: "text", content: texto }])
+  return NextResponse.json([{ type: "text", content: comCabecalhoMavo(texto) }])
 }
 // Não envia nada (bot em silêncio — humano assumiu)
 function mtalkSilencio() {

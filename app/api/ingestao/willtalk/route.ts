@@ -1,4 +1,4 @@
-import { gerarRespostaWhatsApp, pediuHumano } from "@/lib/assisted-response"
+import { comCabecalhoMavo, gerarRespostaWhatsApp, pediuHumano } from "@/lib/assisted-response"
 import {
   carregarConversa,
   salvarConversa,
@@ -422,7 +422,7 @@ export async function POST(request: Request) {
             ticketId,
             cliente,
             canal,
-            resposta,
+            resposta: comCabecalhoMavo(resposta),
             number: contactNumber,
           }).then(() => {
             registrarLogIngestao("auto_reply_enviado", body, {
@@ -456,12 +456,13 @@ export async function POST(request: Request) {
 
       // Retorna a resposta no HTTP — igual ao MTalk
       if (resposta) {
+        const out = comCabecalhoMavo(resposta)
         return NextResponse.json({
           status: "ok",
           atendimento_id: atendimentoId,
-          messages: [{ type: "text", text: resposta }],
-          text: resposta,
-          message: resposta,
+          messages: [{ type: "text", text: out }],
+          text: out,
+          message: out,
         })
       }
     }
