@@ -67,6 +67,7 @@ COMO RESOLVER (o mais importante):
 - Uma pergunta por vez, a mais decisiva. Espere a resposta antes da próxima.
 - Já entendeu a causa? Vá direto à solução, em até 3 passos curtos.
 - Se você NÃO sabe a resposta, não tem certeza, ou já tentou e o problema continua: NÃO fique enrolando com perguntas genéricas nem invente — passe na hora para o suporte técnico humano (siga a regra de escalação abaixo).
+- FIM DO CHAMADO: se o cliente sinalizar que resolveu ("deu certo", "consegui", "funcionou", "era isso", "obrigado", "valeu"), NÃO continue dando passos nem pergunte mais nada técnico. Comemore rápido em 1 linha, confirme que ficou resolvido e se coloque à disposição. Encerre leve.
 
 NUNCA INVENTE:
 - Não afirme marca/modelo de aparelho do qual você não tem certeza. Repita exatamente o que o cliente disse (se ele falou "i9", é "i9" — não troque o número/modelo). Se a foto ou a leitura estiver ambígua, pergunte em vez de chutar.
@@ -240,6 +241,20 @@ export function pediuHumano(texto: string): boolean {
   return PEDIDO_HUMANO.test(texto.trim())
 }
 
+// Sinais de que o cliente RESOLVEU / quer encerrar o chamado.
+const FINALIZACAO =
+  /\b(deu certo|deu bom|consegui|resolv(i|ido|eu|emos|ida)|funcionou|deu boa|era isso( mesmo)?|ficou (bom|certo|show|ok)|tudo (certo|ok|funcionando|resolvido)|obrigad[oa]|valeu|perfeito|show( de bola)?|brigad[oa]|100%|ajudou)\b/i
+// Coisas que indicam que NÃO encerrou (continua o atendimento).
+const CONTINUACAO =
+  /\b(mas|por[ée]m|agora|outro|outra|ainda|n[ãa]o (consegui|deu|funcionou)|erro|falha|problema|d[úu]vida|como|onde|por que|porqu[eê]|qual)\b|\?/i
+
+/** true quando o cliente sinaliza que o problema foi resolvido (e não está reabrindo). */
+export function ehFinalizacao(texto: string): boolean {
+  const t = texto.trim()
+  if (t.length > 90) return false
+  return FINALIZACAO.test(t) && !CONTINUACAO.test(t)
+}
+
 // Instrução de escalação calibrada para o cliente final (não escala à toa).
 const ESCALACAO_WHATSAPP = `
 
@@ -269,6 +284,18 @@ export async function gerarRespostaWhatsApp(
   const textoLimpo = mensagem.trim().slice(0, 8000)
   const ehPrimeira = historico.length === 0
   const primeiroNome = nomeCliente?.trim().split(/\s+/)[0]
+
+  // Cliente sinalizou que RESOLVEU → encerra de forma leve, sem dar mais passos.
+  if (!ehPrimeira && ehFinalizacao(textoLimpo)) {
+    const sysFim =
+      SYSTEM_PROMPT_WHATSAPP +
+      (primeiroNome ? `\n\nO cliente se chama ${primeiroNome}.` : "") +
+      `\n\nO cliente acabou de sinalizar que o problema FOI RESOLVIDO ("${textoLimpo}"). ` +
+      `Responda em 1 ou 2 linhas curtas: comemore de leve, confirme que ficou resolvido e diga que é só chamar se precisar de mais alguma coisa. ` +
+      `NUNCA dê mais passos, NUNCA pergunte detalhes técnicos e NUNCA reabra o problema.`
+    const raw = await gerarTextoIA(sysFim, `Cliente: "${textoLimpo}"`)
+    return { resposta: raw.trim(), escalar: false, domain: "resolvido" }
+  }
 
   const pareceProblema = !ehSaudacao(textoLimpo) || !ehPrimeira
 
