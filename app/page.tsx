@@ -30,6 +30,7 @@ import { EmpresasPanel } from "@/components/empresas-panel"
 import { GroqMotorStrip } from "@/components/groq-motor-strip"
 import { HubPanel } from "@/components/hub-panel"
 import { PlatformasPanel } from "@/components/plataformas-panel"
+import { AiHealthCard } from "@/components/ai-health-card"
 import { KnowledgeUpload } from "@/components/knowledge-upload"
 import { LogsPanel } from "@/components/logs-panel"
 import { ModelCard } from "@/components/model-card"
@@ -389,7 +390,10 @@ export default function Home() {
                 title="Logs da IA"
                 description="Acompanhe o que a IA recebeu, respondeu e onde deu erro — em tempo real."
               />
-              <LogsPanel />
+              <div className="space-y-5">
+                <AiHealthCard />
+                <LogsPanel />
+              </div>
             </TabsContent>
 
             <TabsContent value="configuracoes" className="mt-0">
