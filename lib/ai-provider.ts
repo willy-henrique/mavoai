@@ -1,13 +1,13 @@
 import { GROQ_GPT_OSS_120B, GROQ_LLAMA4_SCOUT_INSTRUCT } from "@/lib/llm-defaults"
 import { getSystemConfig } from "@/lib/system-config-store"
 import { getSecret } from "@/lib/secret-store"
-import { detectProvider } from "@/lib/provider-presets"
+import { detectProvider, PROVIDER_PRESETS, DEFAULT_FALLBACKS, type FallbackEntry } from "@/lib/provider-presets"
 import { logger } from "@/lib/logger"
 
 /** Padrão do produto: Groq (OpenAI-compatible). */
 const DEFAULT_CHAT_BASE_URL = "https://api.groq.com/openai/v1"
 const DEFAULT_CHAT_MODEL = GROQ_GPT_OSS_120B
-const DEFAULT_CURATOR_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"
+const DEFAULT_CURATOR_MODEL = "llama-3.3-70b-versatile"
 const DEFAULT_EMBEDDING_BASE_URL = "https://api.openai.com/v1"
 const DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 const DEFAULT_EMBEDDING_DIMENSIONS = 1024
@@ -245,17 +245,30 @@ function isRateLimit(e: unknown): boolean {
  * estoura o limite. Lê as chaves via secret-store (banco → env), então o usuário
  * gerencia no painel (aba Tokens). Não inclui o próprio provedor primário.
  */
-async function getFallbackProviders(primaryBaseUrl: string) {
+async function getFallbackProviders(primaryBaseUrl: string, primaryModel: string) {
   let primaryHost = ""
   try { primaryHost = new URL(primaryBaseUrl).hostname } catch { /* ignore */ }
+
+  // Cadeia configurada pelo painel (system_config "ai.fallbacks"), ou o padrão.
+  let entries: FallbackEntry[] = []
+  const raw = await getSystemConfig("ai.fallbacks")
+  if (raw) { try { const p = JSON.parse(raw); if (Array.isArray(p)) entries = p } catch { /* json inválido */ } }
+  if (entries.length === 0) entries = DEFAULT_FALLBACKS
+
   const out: Array<{ baseUrl: string; model: string; apiKey: string; label: string }> = []
-  const gem = await getSecret("GOOGLE_API_KEY")
-  if (gem && !primaryHost.includes("google")) {
-    out.push({ baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.0-flash", apiKey: gem, label: "gemini-2.0-flash" })
-  }
-  const or = await getSecret("OPENROUTER_API_KEY")
-  if (or && !primaryHost.includes("openrouter")) {
-    out.push({ baseUrl: "https://openrouter.ai/api/v1", model: "meta-llama/llama-3.3-70b-instruct:free", apiKey: or, label: "openrouter/llama-3.3-70b" })
+  for (const e of entries) {
+    const preset = PROVIDER_PRESETS.find((p) => p.id === e.provider)
+    if (!preset || !e.model) continue
+    const baseUrl = preset.base_url.replace(/\/$/, "")
+    let host = ""
+    try { host = new URL(baseUrl).hostname } catch { /* ignore */ }
+    // Pula apenas se for EXATAMENTE o mesmo provedor+modelo do primário
+    // (Groq → outro modelo Groq é válido: cota diária é por modelo).
+    if (host === primaryHost && e.model === primaryModel) continue
+    let apiKey = await getSecret(preset.env_key)
+    if (!apiKey && preset.id === "groq") apiKey = getGroqApiKey()
+    if (!apiKey) continue
+    out.push({ baseUrl, model: e.model, apiKey, label: `${e.provider}/${e.model}` })
   }
   return out
 }
@@ -270,7 +283,7 @@ async function chatMessagesComFallback(
     return await callChatMessages(primary.baseUrl, primary.apiKey, primary.model, messages, temperature)
   } catch (e) {
     if (!isRateLimit(e)) throw e
-    for (const f of await getFallbackProviders(primary.baseUrl)) {
+    for (const f of await getFallbackProviders(primary.baseUrl, primary.model)) {
       try {
         logger.warn("ia_fallback", { de: primary.model, para: f.label })
         return await callChatMessages(f.baseUrl, f.apiKey, f.model, messages, temperature, 1)
@@ -293,7 +306,7 @@ async function textoComFallback(
     return await callOpenAICompatible(primary.baseUrl, primary.apiKey, primary.model, system, prompt, temperature)
   } catch (e) {
     if (!isRateLimit(e)) throw e
-    for (const f of await getFallbackProviders(primary.baseUrl)) {
+    for (const f of await getFallbackProviders(primary.baseUrl, primary.model)) {
       try {
         logger.warn("ia_fallback", { de: primary.model, para: f.label })
         return await callOpenAICompatible(f.baseUrl, f.apiKey, f.model, system, prompt, temperature, 1)

@@ -17,9 +17,8 @@ import {
 const MODELOS = [
   { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B — forte e rápido (recomendado)" },
   { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B — máxima qualidade (mais lento)" },
-  { id: "meta-llama/llama-4-maverick-17b-128e-instruct", label: "Llama 4 Maverick — preciso" },
-  { id: "meta-llama/llama-4-scout-17b-16e-instruct", label: "Llama 4 Scout — leve" },
-  { id: "gemma2-9b-it", label: "Gemma 2 9B (Google)" },
+  { id: "meta-llama/llama-4-scout-17b-16e-instruct", label: "Llama 4 Scout — rápido/multimodal" },
+  { id: "llama-3.1-8b-instant", label: "Llama 3.1 8B — ultrarrápido" },
 ]
 
 type Effective = {

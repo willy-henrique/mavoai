@@ -29,10 +29,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     compat: "openai",
     color: "border-orange-200 bg-orange-50 text-orange-700",
     models: [
-      { id: "meta-llama/llama-4-scout-17b-16e-instruct",     label: "Llama 4 Scout — rápido",   free: true },
-      { id: "meta-llama/llama-4-maverick-17b-128e-instruct", label: "Llama 4 Maverick — preciso", free: true },
-      { id: "llama-3.3-70b-versatile",                       label: "Llama 3.3 70B",             free: true },
-      { id: "gemma2-9b-it",                                  label: "Gemma 2 9B (Google)",       free: true },
+      { id: "llama-3.3-70b-versatile",                   label: "Llama 3.3 70B — forte e rápido",     free: true },
+      { id: "openai/gpt-oss-120b",                       label: "GPT-OSS 120B — máxima qualidade",    free: true },
+      { id: "meta-llama/llama-4-scout-17b-16e-instruct", label: "Llama 4 Scout — rápido/multimodal",  free: true },
+      { id: "llama-3.1-8b-instant",                      label: "Llama 3.1 8B — ultrarrápido",        free: true },
     ],
   },
   {
@@ -66,6 +66,25 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: "deepseek/deepseek-r1:free",                 label: "DeepSeek R1 (free)",      free: true },
     ],
   },
+]
+
+export interface FallbackEntry {
+  /** id do provider em PROVIDER_PRESETS (groq | gemini | openrouter) */
+  provider: string
+  /** id do modelo daquele provider */
+  model: string
+}
+
+/**
+ * Cadeia de reserva padrão (quando o admin não configurou nada).
+ * Estratégia: primeiro OUTROS modelos Groq (mesma chave, mas o limite diário do
+ * Groq é POR MODELO — cota separada), depois provedores externos. Tudo grátis.
+ */
+export const DEFAULT_FALLBACKS: FallbackEntry[] = [
+  { provider: "groq",       model: "meta-llama/llama-4-scout-17b-16e-instruct" },
+  { provider: "groq",       model: "openai/gpt-oss-120b" },
+  { provider: "gemini",     model: "gemini-2.0-flash" },
+  { provider: "openrouter", model: "meta-llama/llama-3.3-70b-instruct:free" },
 ]
 
 /** Detecta o provider pelo base_url salvo no agente. Null = custom/global. */

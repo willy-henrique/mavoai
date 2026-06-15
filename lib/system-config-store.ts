@@ -153,6 +153,17 @@ export async function saveSecrets(secrets: Record<string, string>): Promise<void
   invalidateConfigCache()
 }
 
+/** Grava (ou atualiza) uma chave qualquer do system_config. */
+export async function setSystemConfig(key: string, value: string): Promise<void> {
+  await query(
+    `INSERT INTO public.system_config (key, value, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+    [key, value],
+  )
+  invalidateConfigCache()
+}
+
 /** Remove um segredo do banco — volta a valer a variável de ambiente. */
 export async function deleteSecret(name: string): Promise<void> {
   await query("DELETE FROM public.system_config WHERE key = $1", [`secret.${name}`])

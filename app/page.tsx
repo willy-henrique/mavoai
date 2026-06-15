@@ -31,6 +31,7 @@ import { GroqMotorStrip } from "@/components/groq-motor-strip"
 import { HubPanel } from "@/components/hub-panel"
 import { PlatformasPanel } from "@/components/plataformas-panel"
 import { AiHealthCard } from "@/components/ai-health-card"
+import { FallbackCard } from "@/components/fallback-card"
 import { KnowledgeUpload } from "@/components/knowledge-upload"
 import { LogsPanel } from "@/components/logs-panel"
 import { ModelCard } from "@/components/model-card"
@@ -379,6 +380,7 @@ export default function Home() {
               />
               <div className="space-y-5">
                 <ModelCard />
+                <FallbackCard />
                 <SecretsPanel />
               </div>
             </TabsContent>
