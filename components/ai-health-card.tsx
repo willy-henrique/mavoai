@@ -13,6 +13,7 @@ type Status = {
   model: string
   status: "ok" | "atencao" | "critico" | "offline" | "sem_chave" | string
   erros_24h: number
+  reserva?: string[]
   retry_after?: string | null
   detalhe_erro?: string | null
   limites?: { requisicoes: Limite; tokens: Limite }
@@ -123,6 +124,14 @@ export function AiHealthCard() {
                 </span>
               </span>
               {data.retry_after && <span className="text-red-600">Aguardar {data.retry_after}s (limite atingido)</span>}
+              <span className="flex items-center gap-1.5">
+                Reserva (fallback):{" "}
+                {data.reserva && data.reserva.length > 0 ? (
+                  <span className="font-medium text-emerald-600">{data.reserva.join(", ")}</span>
+                ) : (
+                  <span className="font-medium text-amber-600">nenhuma configurada</span>
+                )}
+              </span>
             </div>
 
             {data.detalhe_erro && (

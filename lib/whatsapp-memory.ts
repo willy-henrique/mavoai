@@ -23,8 +23,8 @@ export type WhatsAppConversa = {
 
 const TENANT = "default"
 const PLATFORM = "whatsapp"
-/** Mantém os últimos N turnos (~7 trocas) para não estourar o contexto. */
-const MAX_TURNS = 14
+/** Mantém os últimos N turnos (~5 trocas) — contexto suficiente e menos tokens/chamada. */
+const MAX_TURNS = 10
 
 const VAZIA: WhatsAppConversa = { messages: [], handoff: false }
 

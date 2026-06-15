@@ -7,6 +7,7 @@
  */
 import { NextResponse } from "next/server"
 import { getSystemConfig } from "@/lib/system-config-store"
+import { getSecret } from "@/lib/secret-store"
 import { query } from "@/lib/database/postgres-client-no-vector"
 
 export const dynamic = "force-dynamic"
@@ -88,12 +89,18 @@ export async function GET() {
   else if (lowest != null) status = lowest < 0.1 ? "critico" : lowest < 0.25 ? "atencao" : "ok"
   else status = "ok"
 
+  // Provedores de reserva (fallback) disponíveis para quando o primário estoura.
+  const reserva: string[] = []
+  if (!provider.includes("Gemini") && (await getSecret("GOOGLE_API_KEY"))) reserva.push("Gemini")
+  if (!provider.includes("OpenRouter") && (await getSecret("OPENROUTER_API_KEY"))) reserva.push("OpenRouter")
+
   return NextResponse.json({
     ok: httpStatus === 200,
     provider,
     model,
     http_status: httpStatus,
     status,
+    reserva,
     erros_24h: erros24h,
     retry_after: g("retry-after"),
     detalhe_erro: detalheErro,

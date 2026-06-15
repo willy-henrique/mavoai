@@ -2,6 +2,7 @@ import { GROQ_GPT_OSS_120B, GROQ_LLAMA4_SCOUT_INSTRUCT } from "@/lib/llm-default
 import { getSystemConfig } from "@/lib/system-config-store"
 import { getSecret } from "@/lib/secret-store"
 import { detectProvider } from "@/lib/provider-presets"
+import { logger } from "@/lib/logger"
 
 /** Padrão do produto: Groq (OpenAI-compatible). */
 const DEFAULT_CHAT_BASE_URL = "https://api.groq.com/openai/v1"
@@ -106,11 +107,12 @@ async function callOpenAICompatible(
   system: string,
   prompt: string,
   temperature = 0.2,
+  maxRetries = CHAT_MAX_RETRIES,
 ): Promise<string> {
   const reasoning = isReasoningModel(model)
   const timeoutMs = reasoning ? CALL_TIMEOUT_MS_REASONING : CALL_TIMEOUT_MS
   let lastErrorBody = ""
-  for (let attempt = 0; attempt < CHAT_MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
     let response: Response
@@ -153,9 +155,11 @@ async function callOpenAICompatible(
       return text
     }
     lastErrorBody = await response.text()
-    if (response.status === 429 && attempt < CHAT_MAX_RETRIES - 1) {
+    if (response.status === 429 && attempt < maxRetries - 1) {
       const sec = parseGroqRetrySeconds(lastErrorBody)
-      await sleep(sec != null ? Math.min(Math.ceil(sec * 1000) + 400, 90_000) : Math.min(2500 * 2 ** attempt, 30_000))
+      // Limite longo (ex.: cota diária) → não adianta esperar; falha rápido p/ o fallback assumir.
+      if (sec != null && sec > 8) break
+      await sleep(sec != null ? Math.min(Math.ceil(sec * 1000) + 400, 8_000) : Math.min(2500 * 2 ** attempt, 8_000))
       continue
     }
     throw new Error(`Erro no chat IA [${model}]: ${response.status} ${lastErrorBody}`)
@@ -173,6 +177,7 @@ async function callChatMessages(
   model: string,
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
   temperature = 0.3,
+  maxRetries = CHAT_MAX_RETRIES,
 ): Promise<string> {
   const reasoning = isReasoningModel(model)
   const timeoutMs = reasoning ? CALL_TIMEOUT_MS_REASONING : CALL_TIMEOUT_MS
@@ -188,7 +193,7 @@ async function callChatMessages(
   }
 
   let lastErrorBody = ""
-  for (let attempt = 0; attempt < CHAT_MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
     let response: Response
@@ -216,9 +221,11 @@ async function callChatMessages(
       return text
     }
     lastErrorBody = await response.text()
-    if (response.status === 429 && attempt < CHAT_MAX_RETRIES - 1) {
+    if (response.status === 429 && attempt < maxRetries - 1) {
       const sec = parseGroqRetrySeconds(lastErrorBody)
-      await sleep(sec != null ? Math.min(Math.ceil(sec * 1000) + 400, 90_000) : Math.min(2500 * 2 ** attempt, 30_000))
+      // Limite longo (ex.: cota diária) → não adianta esperar; falha rápido p/ o fallback assumir.
+      if (sec != null && sec > 8) break
+      await sleep(sec != null ? Math.min(Math.ceil(sec * 1000) + 400, 8_000) : Math.min(2500 * 2 ** attempt, 8_000))
       continue
     }
     throw new Error(`Erro no chat IA [${model}]: ${response.status} ${lastErrorBody}`)
@@ -226,16 +233,88 @@ async function callChatMessages(
   throw new Error(`Erro no chat IA apos retentativas [${model}]: ${lastErrorBody}`)
 }
 
+// ─── Fallback de provedor (resiliência a rate limit / 429) ─────────────────────
+
+function isRateLimit(e: unknown): boolean {
+  const m = e instanceof Error ? e.message : String(e)
+  return /\b429\b|rate.?limit|rate_limit/i.test(m)
+}
+
+/**
+ * Provedores alternativos (grátis, cotas separadas) para quando o primário
+ * estoura o limite. Lê as chaves via secret-store (banco → env), então o usuário
+ * gerencia no painel (aba Tokens). Não inclui o próprio provedor primário.
+ */
+async function getFallbackProviders(primaryBaseUrl: string) {
+  let primaryHost = ""
+  try { primaryHost = new URL(primaryBaseUrl).hostname } catch { /* ignore */ }
+  const out: Array<{ baseUrl: string; model: string; apiKey: string; label: string }> = []
+  const gem = await getSecret("GOOGLE_API_KEY")
+  if (gem && !primaryHost.includes("google")) {
+    out.push({ baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.0-flash", apiKey: gem, label: "gemini-2.0-flash" })
+  }
+  const or = await getSecret("OPENROUTER_API_KEY")
+  if (or && !primaryHost.includes("openrouter")) {
+    out.push({ baseUrl: "https://openrouter.ai/api/v1", model: "meta-llama/llama-3.3-70b-instruct:free", apiKey: or, label: "openrouter/llama-3.3-70b" })
+  }
+  return out
+}
+
+/** Chat multi-turno com fallback automático quando o primário está no limite. */
+async function chatMessagesComFallback(
+  primary: { baseUrl: string; apiKey: string; model: string },
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  temperature: number,
+): Promise<string> {
+  try {
+    return await callChatMessages(primary.baseUrl, primary.apiKey, primary.model, messages, temperature)
+  } catch (e) {
+    if (!isRateLimit(e)) throw e
+    for (const f of await getFallbackProviders(primary.baseUrl)) {
+      try {
+        logger.warn("ia_fallback", { de: primary.model, para: f.label })
+        return await callChatMessages(f.baseUrl, f.apiKey, f.model, messages, temperature, 1)
+      } catch (e2) {
+        logger.warn("ia_fallback_falhou", { provedor: f.label, erro: (e2 instanceof Error ? e2.message : String(e2)).slice(0, 120) })
+      }
+    }
+    throw e // primário e todas as reservas indisponíveis
+  }
+}
+
+/** Single-shot (system+prompt) com fallback automático em rate limit. */
+async function textoComFallback(
+  primary: { baseUrl: string; apiKey: string; model: string },
+  system: string,
+  prompt: string,
+  temperature: number,
+): Promise<string> {
+  try {
+    return await callOpenAICompatible(primary.baseUrl, primary.apiKey, primary.model, system, prompt, temperature)
+  } catch (e) {
+    if (!isRateLimit(e)) throw e
+    for (const f of await getFallbackProviders(primary.baseUrl)) {
+      try {
+        logger.warn("ia_fallback", { de: primary.model, para: f.label })
+        return await callOpenAICompatible(f.baseUrl, f.apiKey, f.model, system, prompt, temperature, 1)
+      } catch (e2) {
+        logger.warn("ia_fallback_falhou", { provedor: f.label, erro: (e2 instanceof Error ? e2.message : String(e2)).slice(0, 120) })
+      }
+    }
+    throw e
+  }
+}
+
 // ─── API pública ───────────────────────────────────────────────────────────────
 
 /**
- * Gera texto usando o modelo de chat rápido global (Llama 4 Scout via Groq).
+ * Gera texto usando o modelo de chat global (com fallback de provedor em 429).
  * Usar para: triagem, diálogo, respostas em tempo real.
  */
 export async function gerarTextoIA(system: string, prompt: string): Promise<string> {
   const config = await getChatConfig()
   if (!config.apiKey) throw new Error("AI_API_KEY ou GROQ_API_KEY nao configurada")
-  return callOpenAICompatible(config.baseUrl, config.apiKey, config.model, system, prompt, 0.2)
+  return textoComFallback({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model }, system, prompt, 0.2)
 }
 
 /**
@@ -255,7 +334,7 @@ export async function gerarTextoIAConversa(
     ...historico,
     { role: "user" as const, content: mensagemAtual },
   ]
-  return callChatMessages(config.baseUrl, config.apiKey, config.model, messages, 0.35)
+  return chatMessagesComFallback({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model }, messages, 0.35)
 }
 
 /**
@@ -288,7 +367,7 @@ export async function gerarTextoIAConversaComAgente(
     ...historico,
     { role: "user" as const, content: mensagemAtual },
   ]
-  return callChatMessages(baseUrl, apiKey, model, messages, 0.35)
+  return chatMessagesComFallback({ baseUrl, apiKey, model }, messages, 0.35)
 }
 
 /**

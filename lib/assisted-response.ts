@@ -306,7 +306,7 @@ export async function gerarRespostaWhatsApp(
   if (pareceProblema) {
     const [rota, casos] = await Promise.all([
       classifyDomain(textoLimpo, tenantId).catch(() => null),
-      buscarSemantica(textoLimpo, 4).catch(() => []),
+      buscarSemantica(textoLimpo, 3).catch(() => []),
     ])
     if (rota) {
       especialista = rota.agent
