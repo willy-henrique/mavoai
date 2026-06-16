@@ -66,10 +66,14 @@ export async function GET(request: Request) {
       const p = r.payload || {}
       const d = r.detalhes || {}
       const mensagem =
-        str(p.mensagens) || str(p.content) || str(p.message) || str(p.titulo) || ""
+        str(p.mensagens) || str(p.content) || str(p.message) || str(p.titulo) || str(d.nota) || ""
       const detalhe = [
         d.source_system ? `origem=${str(d.source_system)}` : "",
         d.ticket_id ? `ticket=${str(d.ticket_id)}` : "",
+        d.notas != null ? `notas=${str(d.notas)}` : "",
+        d.notas_encontradas != null ? `encontradas=${str(d.notas_encontradas)}` : "",
+        d.indexados != null ? `indexados=${str(d.indexados)}` : "",
+        d.inseridos != null ? `inseridos=${str(d.inseridos)}` : "",
         d.via ? `via=${str(d.via)}` : "",
         d.motivo ? `motivo: ${str(d.motivo)}` : "",
       ].filter(Boolean).join(" · ")

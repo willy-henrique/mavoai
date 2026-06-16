@@ -33,6 +33,7 @@ import { PlatformasPanel } from "@/components/plataformas-panel"
 import { AiHealthCard } from "@/components/ai-health-card"
 import { FallbackCard } from "@/components/fallback-card"
 import { KnowledgeUpload } from "@/components/knowledge-upload"
+import { ObsidianCard } from "@/components/obsidian-card"
 import { LogsPanel } from "@/components/logs-panel"
 import { ModelCard } from "@/components/model-card"
 import { SearchConsole } from "@/components/search-console"
@@ -317,6 +318,7 @@ export default function Home() {
               />
               <div className="space-y-5">
                 <KnowledgeUpload onTrained={handleAtendimentoCriado} />
+                <ObsidianCard />
                 <AtendimentoForm onSuccess={handleAtendimentoCriado} />
               </div>
             </TabsContent>
