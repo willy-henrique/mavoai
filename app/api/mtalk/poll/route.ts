@@ -8,7 +8,7 @@
  *  3. Se login falha (ERR_MAX_ACTIVE_DESKTOP_SESSIONS), usa POST manual como fallback
  */
 
-import { comCabecalhoMavo, gerarRespostaWhatsApp } from "@/lib/assisted-response"
+import { comCabecalhoMavo, ehSaudacaoPura, gerarRespostaWhatsApp } from "@/lib/assisted-response"
 import type { ChatTurn } from "@/lib/whatsapp-memory"
 import { getSecret } from "@/lib/secret-store"
 import { logger } from "@/lib/logger"
@@ -203,11 +203,14 @@ export async function GET() {
 
     // Histórico a partir da própria thread do MTalk (fonte da verdade) —
     // assim a IA tem contexto e não se reapresenta a cada mensagem.
-    const historico: ChatTurn[] = sorted
-      .slice(0, -1)
-      .filter((m) => m.body?.trim())
-      .map((m) => ({ role: m.fromMe ? ("assistant" as const) : ("user" as const), content: m.body!.trim() }))
-      .slice(-14)
+    // Saudação pura abre atendimento NOVO → ignora o histórico anterior da thread.
+    const historico: ChatTurn[] = ehSaudacaoPura(lastMsg.body)
+      ? []
+      : sorted
+          .slice(0, -1)
+          .filter((m) => m.body?.trim())
+          .map((m) => ({ role: m.fromMe ? ("assistant" as const) : ("user" as const), content: m.body!.trim() }))
+          .slice(-14)
 
     // IA com memória + roteamento para o especialista do domínio
     let resposta: string

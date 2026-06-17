@@ -57,7 +57,7 @@ SEU NOME NO TOPO (importante):
 O nome "*Mavo AI*" já aparece AUTOMATICAMENTE em negrito no topo de cada mensagem. Então NUNCA escreva "sou a Mavo AI", "aqui é a Mavo AI" ou similar no corpo do texto — ficaria repetido. Vá direto ao conteúdo.
 
 PRIMEIRA MENSAGEM DA CONVERSA:
-Só na PRIMEIRA mensagem: cumprimente pelo primeiro nome (se souber) e pergunte de forma calorosa como pode ajudar hoje. Exemplos (varie, não copie): "Oi, João! Como posso te ajudar hoje?", "Olá! Em que posso te ajudar hoje?". NÃO cite a Auge nem nenhuma empresa, NÃO liste o que você sabe fazer, NÃO diga "estou à disposição". Depois da primeira, NUNCA recomece com saudação nem se reapresente.
+Só na PRIMEIRA mensagem: cumprimente pelo primeiro nome (se souber) e pergunte de forma calorosa como pode ajudar hoje. Exemplos (varie, não copie): "Oi, João! Como posso te ajudar hoje?", "Olá! Em que posso te ajudar hoje?". NÃO cite a Auge nem nenhuma empresa, NÃO liste o que você sabe fazer, NÃO diga "estou à disposição". NUNCA diga que estão "começando de novo" nem mencione conversa anterior — para o cliente é sempre o começo. Depois da primeira, NUNCA recomece com saudação nem se reapresente.
 
 COMO RESOLVER (o mais importante):
 - Seja CONFIANTE e resolutivo. NUNCA diga que o assunto é "complexo", "complicado", "difícil" ou "trabalhoso" (nem "pode ser um pouco complexo") — isso passa insegurança e desanima o cliente. Trate como algo que você resolve no dia a dia e já parta para a solução.
@@ -117,10 +117,27 @@ function calcularConfianca(casos: ResultadoSemantico[]) {
   return "baixa" as const
 }
 
-const SAUDACOES = /^(oi|olá|ola|bom dia|boa tarde|boa noite|hey|hello|hi|tudo bem|tudo bom|e ai|eai|opa|salve)\b/i
+// `\b` falha depois de acento (ex.: "olá"). Lookahead simples: fim-de-string ou
+// espaço/pontuação (evita \p{L}/flag u por segurança no bundler).
+const SAUDACOES = /^(oi+|ol[aá]+|bom dia|boa tarde|boa noite|hey|hello|hi|tudo bem|tudo bom|tudo certo|e a[ií]|eai|opa|salve)(?=$|[\s,!.?;:…])/i
 
 function ehSaudacao(texto: string): boolean {
   return SAUDACOES.test(texto.trim()) && texto.trim().length < 60
+}
+
+/**
+ * true quando a mensagem é SÓ uma saudação ("oi", "olá", "bom dia", "oi tudo bem").
+ * Uma saudação pura sempre ABRE um atendimento novo: usamos isto para reiniciar a
+ * conversa e não arrastar histórico antigo do ticket (causa do "estamos começando
+ * de novo" quando, na verdade, é a primeira mensagem da pessoa).
+ */
+export function ehSaudacaoPura(texto: string): boolean {
+  const t = texto.trim().toLowerCase()
+  if (!t || t.length > 30) return false
+  const resto = t
+    .replace(/(bom dia|boa tarde|boa noite|tudo bem|tudo bom|tudo certo|td bem|oi+|ol[aá]+|opa|salve|hey|hello|hi|eai|e a[ií]|blz|beleza)/g, "")
+    .replace(/[\s,!.?@…:;-]+/g, "")
+  return resto.length === 0 && SAUDACOES.test(t)
 }
 
 /**

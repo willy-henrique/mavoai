@@ -1,4 +1,4 @@
-import { comCabecalhoMavo, gerarRespostaWhatsApp, pediuHumano } from "@/lib/assisted-response"
+import { comCabecalhoMavo, ehSaudacaoPura, gerarRespostaWhatsApp, pediuHumano } from "@/lib/assisted-response"
 import {
   carregarConversa,
   salvarConversa,
@@ -394,6 +394,8 @@ export async function POST(request: Request) {
           resposta = await dispararHandoff("cliente_pediu_humano")
           clearTimeout(timer)
         } else {
+          // Saudação pura abre atendimento NOVO → descarta histórico antigo do ticket.
+          if (ehSaudacaoPura(mensagens)) conversa.messages = []
           const resultado = await Promise.race([
             gerarRespostaWhatsApp(mensagens, cliente, conversa.messages, tenantId),
             new Promise<never>((_, reject) => {

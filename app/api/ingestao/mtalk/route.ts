@@ -25,6 +25,7 @@
 
 import {
   comCabecalhoMavo,
+  ehSaudacaoPura,
   gerarRespostaWhatsApp,
   pediuHumano,
   SYSTEM_PROMPT_WHATSAPP,
@@ -111,6 +112,8 @@ export async function POST(request: Request) {
     if (pediuHumano(textoUsuario)) {
       return transferirParaHumano(textoUsuario, "cliente_pediu_humano")
     }
+    // Saudação pura abre atendimento NOVO → descarta histórico antigo do ticket.
+    if (ehSaudacaoPura(textoUsuario)) conversa.messages = []
     const { resposta, escalar } = await gerarRespostaWhatsApp(textoUsuario, nomeParaIA, conversa.messages)
     if (escalar) {
       return transferirParaHumano(textoUsuario, "ia_nao_resolveu")

@@ -11,7 +11,7 @@
  * Não precisa de JWT — o browser lê os tickets, o Cerebro só responde.
  */
 
-import { comCabecalhoMavo, gerarRespostaWhatsApp, pediuHumano } from "@/lib/assisted-response"
+import { comCabecalhoMavo, ehSaudacaoPura, gerarRespostaWhatsApp, pediuHumano } from "@/lib/assisted-response"
 import { carregarConversa, salvarConversa, marcarHandoff } from "@/lib/whatsapp-memory"
 import { notifyHandoff } from "@/lib/handoff-notifier"
 import { getSecret } from "@/lib/secret-store"
@@ -87,6 +87,8 @@ export async function POST(request: Request) {
         resposta = MSG_HANDOFF
         escalou = true
       } else {
+        // Saudação pura abre atendimento NOVO → descarta histórico antigo do ticket.
+        if (ehSaudacaoPura(message)) conversa.messages = []
         const r = await gerarRespostaWhatsApp(message, contactName, conversa.messages, "default")
         dominio = r.domain
         if (r.escalar) {
