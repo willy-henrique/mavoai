@@ -7,21 +7,68 @@ __v0_jsx-dev-runtime.ts
 .vercel/
 next.user-config.*
 
-# Environment variables
+# Environment variables — NUNCA commitar arquivos .env reais
 .env
-.env*.local
-.env.local*
-.env*.local*
+.env.local
+.env.*.local
 .env.production
+.env.staging
+.env.test
+# Manter .env.example e .env.production.example (são templates sem segredos reais)
 
-# Common ignores
-node_modules
-.next/
-.DS_Store
-__pycache__/
-*.tsbuildinfo
-
-# Service account / credentials
+# Credentials & service accounts
 *-service-account*.json
 *-knowledge-*.json
 mavo-ai-*.json
+*.pem
+*.p12
+*.pfx
+*.key
+gcloud-*.json
+firebase-*.json
+
+# Logs
+*.log
+dev-server.log
+next-dev.log
+logs/
+
+# Build & cache
+node_modules
+.next/
+dist/
+build/
+out/
+.cache/
+*.tsbuildinfo
+
+# Database backups (dados, não código)
+scripts/backup-*.json
+scripts/*.backup
+*.sql.bak
+dump.sql
+
+# IDE & editor configs
+.vscode/
+.cursor/
+.idea/
+*.swp
+*.swo
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.python-version
+
+# Testing artifacts
+coverage/
+.nyc_output/
+playwright-report/
+test-results/

@@ -19,11 +19,14 @@ export const ADMIN_COOKIE = "mavo_admin"
 const TTL_MS = 1000 * 60 * 60 * 24 * 7
 
 function sessionSecret(): string {
-  return (
-    process.env.ADMIN_SESSION_SECRET ||
-    process.env.CEREBRO_INTERNAL_TOKEN ||
-    "mavo-admin-dev-secret-troque-isto"
-  )
+  const s = process.env.ADMIN_SESSION_SECRET || process.env.CEREBRO_INTERNAL_TOKEN
+  if (!s) {
+    throw new Error(
+      "ADMIN_SESSION_SECRET (ou CEREBRO_INTERNAL_TOKEN) não configurado. " +
+      "Defina a variável de ambiente antes de iniciar o servidor.",
+    )
+  }
+  return s
 }
 
 const enc = new TextEncoder()
@@ -47,8 +50,8 @@ async function sign(payload: string): Promise<string> {
   return toHex(sig)
 }
 
-/** Comparação de tempo (quase) constante para evitar timing attacks. */
-function safeEqual(a: string, b: string): boolean {
+/** Comparação de tempo constante para evitar timing attacks — exportada para outros módulos. */
+export function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false
   let diff = 0
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)

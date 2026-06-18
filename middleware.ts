@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
-import { ADMIN_COOKIE, verifySessionToken } from "@/lib/admin-auth"
+import { ADMIN_COOKIE, verifySessionToken, safeEqual } from "@/lib/admin-auth"
 
 /**
  * Protege o PAINEL ADMIN com login (senha única).
@@ -34,7 +34,7 @@ export async function middleware(req: NextRequest) {
     if (ok) return NextResponse.next()
     const auth = req.headers.get("authorization") || ""
     const internal = process.env.CEREBRO_INTERNAL_TOKEN || ""
-    if (internal && auth === `Bearer ${internal}`) return NextResponse.next()
+    if (internal && safeEqual(auth, `Bearer ${internal}`)) return NextResponse.next()
     return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   }
 

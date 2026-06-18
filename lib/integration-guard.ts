@@ -2,6 +2,7 @@ import { Ratelimit } from "@upstash/ratelimit"
 import { Redis } from "@upstash/redis"
 import { logger } from "@/lib/logger"
 import { getSecret } from "@/lib/secret-store"
+import { safeEqual } from "@/lib/admin-auth"
 
 type AuthResult =
   | { ok: true; tenantId: string; sourceSystem: string; ingestionId: string; sourceEntityId: string }
@@ -44,7 +45,7 @@ export async function validateIntegrationHeaders(request: Request): Promise<Auth
   // Token editável pelo painel (banco → env).
   const auth = getHeader(request.headers, "Authorization")
   const expected = await getSecret("CEREBRO_INGEST_TOKEN")
-  if (!auth.startsWith("Bearer ") || !expected || auth.slice(7) !== expected) {
+  if (!auth.startsWith("Bearer ") || !expected || !safeEqual(auth.slice(7), expected)) {
     return { ok: false, status: 401, error: "unauthorized_integration" }
   }
 
