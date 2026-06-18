@@ -14,7 +14,7 @@ next.user-config.*
 .env.production
 .env.staging
 .env.test
-# Manter .env.example e .env.production.example (são templates sem segredos reais)
+# Manter .env.example (template sem segredos reais)
 
 # Credentials & service accounts
 *-service-account*.json
