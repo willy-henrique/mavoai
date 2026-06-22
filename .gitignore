@@ -15,6 +15,9 @@ next.user-config.*
 .env.staging
 .env.test
 
+# Documentos internos com dados de clientes (NUNCA commitar — repo público)
+docs/_doc-mavo/
+
 # Credentials & service accounts
 *-service-account*.json
 *-knowledge-*.json
