@@ -79,10 +79,13 @@ export interface FallbackEntry {
  * Cadeia de reserva padrão (quando o admin não configurou nada).
  * Estratégia: primeiro OUTROS modelos Groq (mesma chave, mas o limite diário do
  * Groq é POR MODELO — cota separada), depois provedores externos. Tudo grátis.
+ *
+ * NÃO incluir modelos de reasoning (ex.: openai/gpt-oss-120b): eles "pensam"
+ * antes de responder e levam ~15s+, o que é inaceitável num fallback de
+ * atendimento ao vivo. O fallback precisa ser RÁPIDO, não "esperto".
  */
 export const DEFAULT_FALLBACKS: FallbackEntry[] = [
   { provider: "groq",       model: "meta-llama/llama-4-scout-17b-16e-instruct" },
-  { provider: "groq",       model: "openai/gpt-oss-120b" },
   { provider: "gemini",     model: "gemini-2.0-flash" },
   { provider: "openrouter", model: "meta-llama/llama-3.3-70b-instruct:free" },
 ]
