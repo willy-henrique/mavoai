@@ -119,7 +119,10 @@ function calcularConfianca(casos: ResultadoSemantico[]) {
 
 // `\b` falha depois de acento (ex.: "olá"). Lookahead simples: fim-de-string ou
 // espaço/pontuação (evita \p{L}/flag u por segurança no bundler).
-const SAUDACOES = /^(oi+|ol[aá]+|bom dia|boa tarde|boa noite|hey|hello|hi|tudo bem|tudo bom|tudo certo|e a[ií]|eai|opa|salve)(?=$|[\s,!.?;:…])/i
+// Duas partes: (1) saudações multi-palavra/clássicas; (2) abreviações de período
+// ("dia"/"tarde"/"noite") SÓ quando são a mensagem inteira — senão "dia 15 não
+// fechou o caixa" seria confundido com saudação.
+const SAUDACOES = /^(oi+|ol[aá]+|bo[ma] dia|boa tarde|boa noite|hey|hello|hi|tudo bem|tudo bom|tudo certo|e a[ií]|eai|opa|salve)(?=$|[\s,!.?;:…])|^(dia|tarde|noite|madrugada)(?=[\s,!.?;:…]*$)/i
 
 function ehSaudacao(texto: string): boolean {
   return SAUDACOES.test(texto.trim()) && texto.trim().length < 60
@@ -135,7 +138,7 @@ export function ehSaudacaoPura(texto: string): boolean {
   const t = texto.trim().toLowerCase()
   if (!t || t.length > 30) return false
   const resto = t
-    .replace(/(bom dia|boa tarde|boa noite|tudo bem|tudo bom|tudo certo|td bem|oi+|ol[aá]+|opa|salve|hey|hello|hi|eai|e a[ií]|blz|beleza)/g, "")
+    .replace(/(bom dia|boa tarde|boa noite|tudo bem|tudo bom|tudo certo|td bem|oi+|ol[aá]+|opa|salve|hey|hello|hi|eai|e a[ií]|blz|beleza|dia|tarde|noite|madrugada)/g, "")
     .replace(/[\s,!.?@…:;-]+/g, "")
   return resto.length === 0 && SAUDACOES.test(t)
 }
