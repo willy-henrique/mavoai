@@ -70,7 +70,7 @@ ESPECIALIDADE: TillitPDV, SAT fiscal, sangria/suprimento, cupom NFC-e/ECF, conce
     name: "Agente Fiscal",
     description: "NF-e, NFC-e, SEFAZ, certificado digital, rejeições fiscais",
     priority: 10,
-    keywords: ["nfe","nfce","nota fiscal","sefaz","certificado","rejeição","rejeicao","danfe","xml","cfop","cst","csosn","icms","sped","cce","benefício","semcbenef"],
+    keywords: ["nfe","nf-e","nfce","nota fiscal","sefaz","certificado","rejeição","rejeicao","danfe","xml","cfop","cst","csosn","icms","sped","cce","benefício","semcbenef","contingência","contingencia"],
     system_prompt: `Você é especialista fiscal do suporte AUGE ERP. Fala como colega técnico no WhatsApp.
 
 ${REGRAS}
