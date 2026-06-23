@@ -148,13 +148,22 @@ export async function POST(request: Request) {
   if (messageType === "image") {
     if (!mediaUrl) return mtalkError("Não consegui acessar a imagem. Pode descrever o problema?")
     try {
+      // Contexto da conversa para a visão NÃO responder no vácuo: passamos o
+      // histórico recente + a legenda que o cliente mandou junto da imagem.
+      const historicoRecente = conversa.messages
+        .slice(-6)
+        .map((m) => `${m.role === "user" ? "Cliente" : "Mavo AI"}: ${m.content}`)
+        .join("\n")
       const contexto =
         SYSTEM_PROMPT_WHATSAPP +
         (conversa.messages.length
-          ? "\n\nVocê já está conversando com este cliente — não se reapresente, só comente o que vê na imagem e ajude."
-          : "")
-      const resposta = await analisarImagemIA(mediaUrl, contexto)
-      conversa.messages.push({ role: "user", content: "[enviou uma imagem]" })
+          ? `\n\nVocê JÁ está no meio de uma conversa com este cliente — NÃO se reapresente, NÃO comece a resposta com "Mavo AI", e NÃO descreva a imagem de forma genérica. Interprete a imagem DENTRO do contexto da conversa abaixo e continue o raciocínio de onde parou.\n\n=== CONVERSA ATÉ AGORA ===\n${historicoRecente}`
+          : "\n\nComente o que vê na imagem e ajude como suporte técnico.")
+      const legenda = mensagem
+        ? `O cliente enviou esta imagem com a legenda: "${mensagem}". Use a legenda E o contexto da conversa para entender o que ele quer e responda conectando a imagem ao que já estavam falando.`
+        : "O cliente enviou esta imagem. Conecte o que aparece nela ao contexto da conversa e ajude — não descreva de forma genérica."
+      const resposta = await analisarImagemIA(mediaUrl, contexto, legenda)
+      conversa.messages.push({ role: "user", content: mensagem ? `[imagem] ${mensagem}` : "[enviou uma imagem]" })
       conversa.messages.push({ role: "assistant", content: resposta })
       await salvarConversa(ticketId, conversa)
       logger.info("mtalk_resposta_ok", { ticketId, tipo: "image", len: resposta.length })

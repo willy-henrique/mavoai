@@ -432,7 +432,7 @@ const AUDIO_MODEL = "whisper-large-v3-turbo"
  * Analisa uma imagem (screenshot de sistema, erro na tela, etc.) e gera uma
  * resposta de suporte baseada no que é visível. Usa Llama 4 Scout vision via Groq.
  */
-export async function analisarImagemIA(imageUrl: string, system: string): Promise<string> {
+export async function analisarImagemIA(imageUrl: string, system: string, userText?: string): Promise<string> {
   const groqKey = getGroqApiKey()
   if (!groqKey) throw new Error("GROQ_API_KEY nao configurada para visao")
 
@@ -455,7 +455,7 @@ export async function analisarImagemIA(imageUrl: string, system: string): Promis
           role: "user",
           content: [
             { type: "image_url", image_url: { url: dataUrl } },
-            { type: "text", text: "O cliente enviou esta imagem. Analise o que está na tela e responda como suporte técnico." },
+            { type: "text", text: userText?.trim() || "O cliente enviou esta imagem. Analise o que está na tela e responda como suporte técnico." },
           ],
         },
       ],
