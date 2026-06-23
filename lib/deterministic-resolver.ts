@@ -12,17 +12,40 @@ export interface DeterministicMatch {
   errorKey: string
   solution: string
   confidence: 1.0
+  /** Domínio do agente especialista a que o erro pertence (para roteamento/health-check). */
+  domain?: string
 }
 
 interface ErrorPattern {
   key: string
   patterns: RegExp[]
   solution: string
+  /** Domínio do agente especialista a que o erro pertence. */
+  domain?: string
 }
 
 // ─── Catálogo de erros com solução exata ─────────────────────────────────────
 
 const ERROR_CATALOG: ErrorPattern[] = [
+  {
+    key: "prazo_cancelamento_vencido",
+    domain: "fiscal",
+    patterns: [
+      /prazo\s+de\s+cancelamento\s+superior\s+ao\s+previsto/i,
+      /cancelamento\s+superior\s+ao\s+previsto\s+na\s+legisla[cç][aã]o/i,
+      /prazo\s+(de\s+)?cancelamento\s+(j[aá]\s+)?(venc|expir|esgot|passou|ultrapass)/i,
+      /n[aã]o\s+(consigo|consegue|d[aá])\s+(mais\s+)?cancelar\s+.*nota/i,
+    ],
+    solution: `Esse erro é claro: o *prazo legal para cancelar a NF-e já venceu*. Não é problema de configuração do computador nem do sistema — a janela legal de cancelamento (em geral 24h após a autorização, podendo variar por estado) passou e a SEFAZ não aceita mais o cancelamento.
+
+O que fazer agora:
+1. *Não tente forçar o cancelamento de novo* — a SEFAZ vai rejeitar sempre, o prazo é legal.
+2. Se o problema for um *dado errado* na nota (e não a venda em si), avalie *CC-e (Carta de Correção)* — mas ela NÃO corrige valor, CFOP, dados do destinatário nem cancela a operação.
+3. Se a venda não aconteceu de fato / precisa reverter o valor, o caminho é emitir uma *NF-e de devolução* (entrada, CFOP 1202/2202 conforme o caso) referenciando a nota original.
+4. Confirme o procedimento com o contador, porque o tratamento fiscal varia conforme o motivo (erro de emissão x cancelamento de venda).
+
+Me fala qual foi o motivo (dado errado na nota ou a venda não ocorreu) que eu te indico o caminho exato.`,
+  },
   {
     key: "dns_12007",
     patterns: [
@@ -46,6 +69,7 @@ Me fala se funcionou.`,
   },
   {
     key: "certificado_vencido",
+    domain: "fiscal",
     patterns: [
       /certificado\s+(digital\s+)?(inv[aá]lido|vencido|expirado|n[aã]o\s+encontrado)/i,
       /rejei[cç][aã]o\s*280/i,
@@ -81,6 +105,7 @@ Me fala o CNPJ (só os números) para eu ajudar a identificar o problema.`,
   },
   {
     key: "rejeicao_539",
+    domain: "fiscal",
     patterns: [
       /rejei[cç][aã]o\s*539/i,
     ],
@@ -329,6 +354,7 @@ export function resolverDeterministico(
           errorKey: entry.key,
           solution: entry.solution,
           confidence: 1.0,
+          domain: entry.domain,
         }
       }
     }

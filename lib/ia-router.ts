@@ -24,12 +24,30 @@ const LOW_THRESHOLD  = 0.4
 
 // ─── Pontuação por keywords ───────────────────────────────────────────────────
 
-function scoreKeywords(text: string, keywords: string[]): number {
+/**
+ * Conta quantas keywords do agente aparecem no texto do usuário.
+ * (substring case-insensitive — funciona para termos compostos como "tela preta")
+ */
+function countMatches(text: string, keywords: string[]): number {
   if (keywords.length === 0) return 0
   const t = text.toLowerCase()
-  const hits = keywords.filter((kw) => t.includes(kw.toLowerCase())).length
-  // normalizado pelo raiz quadrada do total (penaliza agentes com pouquíssimas keywords)
-  return hits / Math.sqrt(Math.max(keywords.length, 1))
+  return keywords.filter((kw) => t.includes(kw.toLowerCase())).length
+}
+
+/**
+ * Converte nº de keywords batidas em confiança [0,1) com retornos decrescentes.
+ *
+ * IMPORTANTE: a confiança depende SÓ de quantas keywords bateram — NUNCA do
+ * tamanho do vocabulário do agente. A fórmula antiga (hits / √total) diluía o
+ * score de agentes com lista rica de keywords: o PDV (13 keywords) batia
+ * 1/√13 ≈ 0,28 num único acerto e caía no fallback (< 0,4). Penalizar vocabulário
+ * é o inverso do que queremos — quanto mais sinônimos o agente cobre, melhor.
+ *
+ *   1 match → 0,55   2 → 0,69   3 → 0,76   4 → 0,81 …  (satura perto de 1)
+ */
+function confidenceFromMatches(matched: number): number {
+  if (matched <= 0) return 0
+  return 1 - 1 / (matched + 1.2)
 }
 
 // ─── Desempate via LLM ────────────────────────────────────────────────────────
@@ -70,17 +88,28 @@ export async function classifyDomain(
     return { domain: "geral", agent: null, confidence: 0, strategy: "fallback" }
   }
 
-  // 1. Score keyword para todos os agentes
-  const scored = agents.map((a) => ({
-    agent: a,
-    score: scoreKeywords(text, a.keywords),
-  })).sort((a, b) => b.score - a.score)
+  // 1. Score keyword para todos os agentes.
+  // Ordena por confiança (nº de matches) e, em empate, pela especificidade
+  // (fração do vocabulário batida) — assim o agente cujo termo é mais "central"
+  // ganha o desempate sem que isso derrube agentes de vocabulário rico abaixo
+  // do limiar.
+  const scored = agents.map((a) => {
+    const matched = countMatches(text, a.keywords)
+    return {
+      agent: a,
+      matched,
+      score: confidenceFromMatches(matched),
+      specificity: a.keywords.length > 0 ? matched / a.keywords.length : 0,
+    }
+  }).sort((a, b) =>
+    b.score - a.score || b.specificity - a.specificity,
+  )
 
   const best = scored[0]
 
   // 2. Decisão por threshold
   if (best.score >= HIGH_THRESHOLD) {
-    logger.info("ia_router_keywords", { domain: best.agent.domain, score: best.score })
+    logger.info("ia_router_keywords", { domain: best.agent.domain, matched: best.matched, score: best.score })
     return {
       domain: best.agent.domain,
       agent: best.agent,
@@ -90,8 +119,21 @@ export async function classifyDomain(
   }
 
   if (best.score >= LOW_THRESHOLD) {
-    // Candidatos empatados ou próximos — LLM desempata
+    // Candidatos na faixa de desempate
     const candidates = scored.filter((s) => s.score >= LOW_THRESHOLD)
+
+    // Só um candidato bateu keywords → roteia direto, sem gastar chamada de LLM.
+    if (candidates.length === 1) {
+      logger.info("ia_router_keywords_single", { domain: best.agent.domain, matched: best.matched, score: best.score })
+      return {
+        domain: best.agent.domain,
+        agent: best.agent,
+        confidence: best.score,
+        strategy: "keywords",
+      }
+    }
+
+    // Vários candidatos empatados ou próximos — LLM desempata
     const domain = await llmClassify(
       text,
       candidates.map((c) => ({

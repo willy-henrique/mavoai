@@ -1,0 +1,187 @@
+{
+  "_descricao": "Casos de regressão adversariais do Mavo.AI. Rodados por scripts/validar-regressao.mjs contra POST /api/orquestrador/v1/diagnostico. 'deve_conter' = aprova se a resposta tiver AO MENOS UMA das frases (OR, case-insensitive). 'nao_deve_conter' = reprova se tiver QUALQUER uma. Frases longas/específicas em vez de palavras soltas (ex.: 'data de emissão' é legítimo no domínio fiscal, então não banimos 'data' cru).",
+  "casos": [
+    {
+      "id": "fiscal-001",
+      "dominio": "fiscal",
+      "mensagem": "prazo de cancelamento superior ao previsto na legislação, o que faço?",
+      "agente_esperado": "fiscal",
+      "criterio_aprovacao": "Deve reconhecer que o prazo legal de cancelamento venceu e orientar CC-e/devolução. NÃO pode tratar como erro de data/hora/relógio do sistema.",
+      "deve_conter": ["prazo", "venceu", "cancelar", "CC-e", "carta de correção", "devolução"],
+      "nao_deve_conter": ["relógio", "ajuste de data e hora", "fuso horário", "data/hora do sistema"]
+    },
+    {
+      "id": "fiscal-002",
+      "dominio": "fiscal",
+      "mensagem": "rejeição 539, CSOSN inválido",
+      "agente_esperado": "fiscal",
+      "criterio_aprovacao": "Deve identificar 539 = CSOSN inválido para o regime e orientar correção no cadastro/operação fiscal.",
+      "deve_conter": ["CSOSN", "539", "regime", "operação fiscal", "cadastro do produto"],
+      "nao_deve_conter": ["certificado vencido", "DNS"]
+    },
+    {
+      "id": "fiscal-003",
+      "dominio": "fiscal",
+      "mensagem": "rejeição 562 certificado",
+      "agente_esperado": "fiscal",
+      "criterio_aprovacao": "Deve tratar como problema de certificado digital (token/driver/associação à empresa).",
+      "deve_conter": ["certificado", "token", "driver", "associad"],
+      "nao_deve_conter": ["CSOSN", "sangria"]
+    },
+    {
+      "id": "fiscal-004",
+      "dominio": "fiscal",
+      "mensagem": "rejeição 228 data de emissão atrasada",
+      "agente_esperado": "fiscal",
+      "criterio_aprovacao": "Deve reconhecer 228/data de emissão fora do prazo de transmissão e orientar reemissão com data correta.",
+      "deve_conter": ["data de emissão", "228", "reemiti", "prazo", "transmiss"],
+      "nao_deve_conter": ["certificado vencido"]
+    },
+    {
+      "id": "fiscal-005",
+      "dominio": "fiscal",
+      "mensagem": "rejeição 165 município fora da tabela IBGE",
+      "agente_esperado": "fiscal",
+      "criterio_aprovacao": "Deve apontar código de município IBGE incorreto no cadastro e orientar correção.",
+      "deve_conter": ["município", "IBGE", "código", "cadastro"],
+      "nao_deve_conter": ["sangria", "concentrador"]
+    },
+    {
+      "id": "fiscal-006",
+      "dominio": "fiscal",
+      "mensagem": "certificado A1 expirado, não consigo emitir nota",
+      "agente_esperado": "fiscal",
+      "criterio_aprovacao": "Deve orientar renovação/reimportação do certificado A1 (.pfx).",
+      "deve_conter": ["certificado", "A1", "renov", "reimport", "pfx", ".pfx"],
+      "nao_deve_conter": ["CSOSN", "concentrador"]
+    },
+    {
+      "id": "fiscal-007",
+      "dominio": "fiscal",
+      "mensagem": "NF-e em contingência há mais de 24h, e agora?",
+      "agente_esperado": "fiscal",
+      "criterio_aprovacao": "Deve orientar transmissão/regularização das notas emitidas em contingência assim que a SEFAZ normalizar.",
+      "deve_conter": ["contingência", "transmiti", "SEFAZ", "regulariz", "normaliz"],
+      "nao_deve_conter": ["sangria", "pinpad"]
+    },
+    {
+      "id": "fiscal-008",
+      "dominio": "fiscal",
+      "mensagem": "SPED Fiscal com divergência no registro E110",
+      "agente_esperado": "fiscal",
+      "criterio_aprovacao": "Deve reconhecer divergência de apuração de ICMS no E110 do SPED e orientar conferência/recálculo.",
+      "deve_conter": ["E110", "SPED", "ICMS", "apuração", "divergência"],
+      "nao_deve_conter": ["concentrador", "pinpad"]
+    },
+
+    {
+      "id": "pdv-001",
+      "dominio": "pdv",
+      "mensagem": "fiz uma sangria de R$200 mas era R$20, como corrijo?",
+      "agente_esperado": "pdv",
+      "criterio_aprovacao": "A correção certa é suprimento de R$180 OU estorno+relançamento. NUNCA orientar nova sangria de R$20 + suprimento de R$180.",
+      "deve_conter": ["suprimento", "180", "estorno", "relança"],
+      "nao_deve_conter": ["nova sangria de R$20", "sangria de 20"]
+    },
+    {
+      "id": "pdv-002",
+      "dominio": "pdv",
+      "mensagem": "o pdv não abre, erro de MAC",
+      "agente_esperado": "pdv",
+      "criterio_aprovacao": "Deve tratar erro de MAC / liberação do PDV (concentrador/licença/cadastro do terminal).",
+      "deve_conter": ["MAC", "concentrador", "terminal", "licença", "liberar"],
+      "nao_deve_conter": ["certificado A1", "CSOSN"]
+    },
+    {
+      "id": "pdv-003",
+      "dominio": "pdv",
+      "mensagem": "caixa já aberto por outro operador, não consigo abrir",
+      "agente_esperado": "pdv",
+      "criterio_aprovacao": "Deve orientar fechar/encerrar o caixa do outro operador ou liberar a sessão antes de abrir.",
+      "deve_conter": ["caixa", "operador", "fechar", "encerr", "sessão", "liberar"],
+      "nao_deve_conter": ["certificado", "SEFAZ"]
+    },
+    {
+      "id": "pdv-004",
+      "dominio": "pdv",
+      "mensagem": "TillitPDV está com a tela preta",
+      "agente_esperado": "pdv",
+      "criterio_aprovacao": "Deve orientar diagnóstico do TillitPDV (serviço/concentrador/reiniciar).",
+      "deve_conter": ["tillit", "concentrador", "serviço", "reinici"],
+      "nao_deve_conter": ["certificado", "CSOSN"]
+    },
+    {
+      "id": "pdv-005",
+      "dominio": "pdv",
+      "mensagem": "concentrador não responde",
+      "agente_esperado": "pdv",
+      "criterio_aprovacao": "Deve orientar verificar serviço do concentrador, IP/porta e firewall.",
+      "deve_conter": ["concentrador", "serviço", "porta", "firewall", "IP"],
+      "nao_deve_conter": ["certificado", "pinpad"]
+    },
+    {
+      "id": "pdv-006",
+      "dominio": "pdv",
+      "mensagem": "fechamento de caixa com divergência de valor",
+      "agente_esperado": "pdv",
+      "criterio_aprovacao": "Deve orientar conferência de sangrias/suprimentos/formas de pagamento no fechamento.",
+      "deve_conter": ["fechamento", "sangria", "suprimento", "conferir", "divergência"],
+      "nao_deve_conter": ["SEFAZ", "certificado"]
+    },
+    {
+      "id": "pdv-007",
+      "dominio": "pdv",
+      "mensagem": "produto não encontrado por EAN no caixa",
+      "agente_esperado": "pdv",
+      "criterio_aprovacao": "Deve orientar conferir cadastro do EAN/código de barras do produto e sincronização com o PDV.",
+      "deve_conter": ["EAN", "código de barras", "cadastro", "produto", "sincroniz"],
+      "nao_deve_conter": ["certificado", "pinpad"]
+    },
+    {
+      "id": "pdv-008",
+      "dominio": "pdv",
+      "mensagem": "sangria bloqueada por permissão",
+      "agente_esperado": "pdv",
+      "criterio_aprovacao": "Deve orientar liberar a permissão do operador para sangria (perfil/permissões).",
+      "deve_conter": ["permissão", "operador", "perfil", "liberar", "sangria"],
+      "nao_deve_conter": ["certificado", "SEFAZ"]
+    },
+
+    {
+      "id": "fallback-001",
+      "dominio": "fallback",
+      "mensagem": "olá",
+      "agente_esperado": "fallback",
+      "criterio_aprovacao": "Saudação pura: deve apresentar menu/abertura, não inventar solução técnica.",
+      "deve_conter": [],
+      "nao_deve_conter": ["concentrador", "CSOSN", "certificado", "pinpad", "sangria"]
+    },
+    {
+      "id": "fallback-002",
+      "dominio": "fallback",
+      "mensagem": "como emito um boleto financeiro?",
+      "agente_esperado": "fallback",
+      "criterio_aprovacao": "Fora do escopo de suporte técnico AUGE: deve reconhecer e encaminhar, não inventar passos.",
+      "deve_conter": [],
+      "nao_deve_conter": ["concentrador", "CSOSN", "certificado A1", "pinpad", "sangria"]
+    },
+    {
+      "id": "fallback-003",
+      "dominio": "fallback",
+      "mensagem": "🙂",
+      "agente_esperado": "fallback",
+      "criterio_aprovacao": "Mensagem só com emoji/sem conteúdo: não deve inventar solução técnica.",
+      "deve_conter": [],
+      "nao_deve_conter": ["concentrador", "CSOSN", "certificado", "pinpad", "sangria"]
+    },
+    {
+      "id": "fallback-004",
+      "dominio": "fallback",
+      "mensagem": "o Auge tem um assistente de voz que faz o atendimento do cliente sozinho?",
+      "agente_esperado": "fallback",
+      "criterio_aprovacao": "Funcionalidade inexistente: não deve afirmar que existe nem inventar caminho de menu.",
+      "deve_conter": [],
+      "nao_deve_conter": ["sim, o Auge tem", "acesse o módulo de voz", "ative o assistente de voz"]
+    }
+  ]
+}
