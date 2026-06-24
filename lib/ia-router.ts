@@ -25,13 +25,23 @@ const LOW_THRESHOLD  = 0.4
 // ─── Pontuação por keywords ───────────────────────────────────────────────────
 
 /**
+ * Normaliza para casar keyword sem depender de acento: "rejeição" e "rejeicao"
+ * (typo comum do cliente) passam a bater. Mesma estratégia do resolver
+ * determinístico (lib/deterministic-resolver), que antes era inconsistente com
+ * o roteador — uma mensagem com acento errado caía no fallback.
+ */
+function normalize(s: string): string {
+  return s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "")
+}
+
+/**
  * Conta quantas keywords do agente aparecem no texto do usuário.
- * (substring case-insensitive — funciona para termos compostos como "tela preta")
+ * (substring, sem acento e sem caixa — funciona para termos compostos como "tela preta")
  */
 function countMatches(text: string, keywords: string[]): number {
   if (keywords.length === 0) return 0
-  const t = text.toLowerCase()
-  return keywords.filter((kw) => t.includes(kw.toLowerCase())).length
+  const t = normalize(text)
+  return keywords.filter((kw) => t.includes(normalize(kw))).length
 }
 
 /**

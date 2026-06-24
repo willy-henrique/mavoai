@@ -90,7 +90,8 @@ function pct(n, d) {
 }
 
 async function main() {
-  const arquivo = path.join(__dirname, "test-cases.json")
+  // Permite rodar outro conjunto: CASES_FILE=test-cases-variacoes.json node scripts/validar-regressao.mjs
+  const arquivo = path.join(__dirname, process.env.CASES_FILE || "test-cases.json")
   const { casos } = JSON.parse(readFileSync(arquivo, "utf-8"))
 
   console.log(`\n🧪 Mavo.AI — regressão (${casos.length} casos)`)

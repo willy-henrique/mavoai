@@ -64,6 +64,12 @@ describe("classifyDomain — correção do roteador (Problema 2)", () => {
     expect(r.confidence).toBeGreaterThanOrEqual(0.4)
   })
 
+  it("casa keyword sem acento — typo 'rejeiçao'/'sefaz' ainda roteia pro Fiscal", async () => {
+    // Cliente digita errado: "rejeiçao" (sem til) deve bater com a keyword "rejeição".
+    const r = await classifyDomain("deu rejeiçao 165 na sefaz", "auge")
+    expect(r.domain).toBe("fiscal")
+  })
+
   it("dois domínios empatados → desempata via LLM", async () => {
     vi.mocked(gerarTextoIA).mockResolvedValue("fiscal")
     // "sat" é keyword de PDV e "csosn" de fiscal → 2 candidatos na faixa
