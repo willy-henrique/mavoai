@@ -1,4 +1,4 @@
-import { gerarTextoIA } from "@/lib/ai-provider"
+import { gerarTextoIA, gerarTextoIARapido } from "@/lib/ai-provider"
 import { logger } from "@/lib/logger"
 import { ANTI_HALLUCINATION_BLOCK, ESCALATION_TOKEN, isEscalationSignal } from "@/lib/escalation-detector"
 
@@ -150,7 +150,8 @@ export async function evaluateInvestigationTurn(params: {
     (imageAnalysis ? `IMAGEM: ${imageAnalysis}\n` : "")
 
   try {
-    const raw = await gerarTextoIA(EVAL_SYSTEM, userPrompt)
+    // Classificação pura (JSON) → modelo rápido/barato, economiza cota do modelo de chat.
+    const raw = await gerarTextoIARapido(EVAL_SYSTEM, userPrompt)
     const parsed = parseInvestigationEvalJson(raw)
     if (parsed) return { ...parsed, textoResposta: "" }
     logger.warn("investigation_eval_unparseable", { preview: raw.slice(0, 200) })

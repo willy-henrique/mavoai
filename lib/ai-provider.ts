@@ -1,4 +1,4 @@
-import { GROQ_GPT_OSS_120B, GROQ_LLAMA4_SCOUT_INSTRUCT } from "@/lib/llm-defaults"
+import { GROQ_GPT_OSS_120B, GROQ_LLAMA4_SCOUT_INSTRUCT, GROQ_LLAMA31_8B_INSTANT } from "@/lib/llm-defaults"
 import { getSystemConfig } from "@/lib/system-config-store"
 import { getSecret } from "@/lib/secret-store"
 import { detectProvider, PROVIDER_PRESETS, DEFAULT_FALLBACKS, type FallbackEntry } from "@/lib/provider-presets"
@@ -8,6 +8,8 @@ import { logger } from "@/lib/logger"
 const DEFAULT_CHAT_BASE_URL = "https://api.groq.com/openai/v1"
 const DEFAULT_CHAT_MODEL = GROQ_GPT_OSS_120B
 const DEFAULT_CURATOR_MODEL = "llama-3.3-70b-versatile"
+/** Modelo rápido p/ classificação interna (triagem/avaliação) — barato, baixa latência. */
+const DEFAULT_FAST_MODEL = GROQ_LLAMA31_8B_INSTANT
 const DEFAULT_EMBEDDING_BASE_URL = "https://api.openai.com/v1"
 const DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 const DEFAULT_EMBEDDING_DIMENSIONS = 1024
@@ -78,6 +80,27 @@ async function getCuratorConfig() {
   const baseUrl = await getSystemConfig("ai.base_url", process.env.AI_BASE_URL || DEFAULT_CHAT_BASE_URL) ?? DEFAULT_CHAT_BASE_URL
   const model = await getSystemConfig("ai.curator_model", process.env.AI_CURATOR_MODEL?.trim() || DEFAULT_CURATOR_MODEL) ?? DEFAULT_CURATOR_MODEL
   const apiKey = await getSystemConfig("ai.api_key", getGroqApiKey()) ?? ""
+  return { baseUrl, apiKey, model }
+}
+
+/**
+ * Config do modelo RÁPIDO (classificação interna). Mesma base_url/chave do chat.
+ * Resolução do modelo: ai.fast_model (DB) → AI_FAST_MODEL (env) → llama-3.1-8b-instant no Groq.
+ * Fora do Groq sem override → cai no próprio modelo de chat (evita id inexistente no provider).
+ */
+async function getFastConfig() {
+  const baseUrl = await getSystemConfig("ai.base_url", process.env.AI_BASE_URL || DEFAULT_CHAT_BASE_URL) ?? DEFAULT_CHAT_BASE_URL
+  const apiKey = await getSystemConfig("ai.api_key", getGroqApiKey()) ?? ""
+  const explicitFast = await getSystemConfig("ai.fast_model", process.env.AI_FAST_MODEL?.trim())
+  let model: string
+  if (explicitFast) {
+    model = explicitFast
+  } else if (baseUrl.includes("groq.com")) {
+    model = DEFAULT_FAST_MODEL
+  } else {
+    const explicitChat = await getSystemConfig("ai.chat_model", process.env.AI_CHAT_MODEL?.trim())
+    model = explicitChat || DEFAULT_CHAT_MODEL
+  }
   return { baseUrl, apiKey, model }
 }
 
@@ -328,6 +351,18 @@ export async function gerarTextoIA(system: string, prompt: string): Promise<stri
   const config = await getChatConfig()
   if (!config.apiKey) throw new Error("AI_API_KEY ou GROQ_API_KEY nao configurada")
   return textoComFallback({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model }, system, prompt, 0.2)
+}
+
+/**
+ * Geração RÁPIDA/barata para tarefas internas de CLASSIFICAÇÃO que NÃO vão ao cliente
+ * (avaliação de investigação, roteamento de fila). Usa o "modelo rápido" (default
+ * llama-3.1-8b-instant no Groq) para economizar cota e latência. Mantém fallback em 429.
+ * Temperatura baixa (0.1) — saída determinística.
+ */
+export async function gerarTextoIARapido(system: string, prompt: string): Promise<string> {
+  const config = await getFastConfig()
+  if (!config.apiKey) throw new Error("AI_API_KEY ou GROQ_API_KEY nao configurada")
+  return textoComFallback({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model }, system, prompt, 0.1)
 }
 
 /**

@@ -6,3 +6,5 @@
  */
 export const GROQ_GPT_OSS_120B = "openai/gpt-oss-120b"
 export const GROQ_LLAMA4_SCOUT_INSTRUCT = "meta-llama/llama-4-scout-17b-16e-instruct"
+/** Modelo rápido/barato para tarefas internas de classificação (não vão ao cliente). */
+export const GROQ_LLAMA31_8B_INSTANT = "llama-3.1-8b-instant"

@@ -5,7 +5,7 @@ import {
   gerarRespostaConversacional,
   gerarPrimerInvestigacao,
 } from "@/lib/investigation-quality"
-import { gerarTextoIA } from "@/lib/ai-provider"
+import { gerarTextoIARapido } from "@/lib/ai-provider"
 import { isLikelyImagePayload } from "@/lib/vision-utils"
 import {
   gerarSolucaoAutonoma,
@@ -421,7 +421,8 @@ async function inferQueueFromAI(
     "Retorne só JSON."
 
   try {
-    const raw = await gerarTextoIA(systemPrompt, userPrompt)
+    // Classificação de fila (JSON) → modelo rápido/barato.
+    const raw = await gerarTextoIARapido(systemPrompt, userPrompt)
     const match = raw.match(/\{[\s\S]*\}/)
     if (!match) return { queueId: null, confidence: 0 }
     const parsed = JSON.parse(match[0]) as { queue_id?: unknown; confidence?: unknown }

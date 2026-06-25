@@ -6,7 +6,7 @@
  * sem restart do servidor (TTL de cache: 30s).
  *
  * Chaves disponíveis:
- *   ai.base_url       | ai.chat_model | ai.curator_model | ai.api_key
+ *   ai.base_url       | ai.chat_model | ai.curator_model | ai.fast_model | ai.api_key
  *   embedding.base_url | embedding.model | embedding.api_key | embedding.dimensions
  */
 
@@ -78,6 +78,7 @@ export interface ModelConfig {
   ai_base_url?: string
   ai_chat_model?: string
   ai_curator_model?: string
+  ai_fast_model?: string
   ai_api_key?: string
   embedding_base_url?: string
   embedding_model?: string
@@ -97,6 +98,7 @@ export async function saveModelConfig(cfg: ModelConfig): Promise<void> {
     ai_base_url        : "ai.base_url",
     ai_chat_model      : "ai.chat_model",
     ai_curator_model   : "ai.curator_model",
+    ai_fast_model      : "ai.fast_model",
     ai_api_key         : "ai.api_key",
     embedding_base_url : "embedding.base_url",
     embedding_model    : "embedding.model",

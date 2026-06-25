@@ -1226,6 +1226,7 @@ interface ModelConfigData {
     ai_base_url: string
     ai_chat_model: string
     ai_curator_model: string
+    ai_fast_model: string
     ai_api_key_set: boolean
     ai_api_key_masked: string
     ai_api_key_source: "db" | "env" | "none"
@@ -1245,30 +1246,35 @@ const AI_PRESETS = [
     base_url: "https://api.groq.com/openai/v1",
     chat_model: "meta-llama/llama-4-scout-17b-16e-instruct",
     curator_model: "meta-llama/llama-4-maverick-17b-128e-instruct",
+    fast_model: "llama-3.1-8b-instant",
   },
   {
     label: "Gemini",
     base_url: "https://generativelanguage.googleapis.com/v1beta/openai/",
     chat_model: "gemini-2.0-flash",
     curator_model: "gemini-2.0-flash",
+    fast_model: "gemini-2.0-flash-lite",
   },
   {
     label: "OpenRouter",
     base_url: "https://openrouter.ai/api/v1",
     chat_model: "meta-llama/llama-3.3-70b-instruct:free",
     curator_model: "deepseek/deepseek-r1:free",
+    fast_model: "mistralai/mistral-7b-instruct:free",
   },
   {
     label: "OpenAI",
     base_url: "https://api.openai.com/v1",
     chat_model: "gpt-4o-mini",
     curator_model: "gpt-4o",
+    fast_model: "gpt-4o-mini",
   },
   {
     label: "xAI",
     base_url: "https://api.x.ai/v1",
     chat_model: "grok-3-mini",
     curator_model: "grok-3",
+    fast_model: "grok-3-mini",
   },
 ]
 
@@ -1312,6 +1318,7 @@ function ModelosIASection() {
     ai_base_url: "",
     ai_chat_model: "",
     ai_curator_model: "",
+    ai_fast_model: "",
     ai_api_key: "",
     embedding_base_url: "",
     embedding_model: "",
@@ -1337,6 +1344,7 @@ function ModelosIASection() {
       ai_base_url: preset.base_url,
       ai_chat_model: preset.chat_model,
       ai_curator_model: preset.curator_model,
+      ai_fast_model: preset.fast_model,
     }))
   }
 
@@ -1450,6 +1458,8 @@ function ModelosIASection() {
             <div>
               <span className="block font-medium text-foreground/70 mb-0.5">Modelo chat</span>
               <span className="font-mono">{eff.ai_chat_model}</span>
+              <span className="block font-medium text-foreground/70 mb-0.5 mt-1.5">Modelo rápido</span>
+              <span className="font-mono">{eff.ai_fast_model}</span>
             </div>
             <div className="flex items-start gap-2">
               <div>
@@ -1479,6 +1489,24 @@ function ModelosIASection() {
                 onChange={set("ai_chat_model")}
                 className="text-xs font-mono h-8"
               />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium">Modelo Rápido (classificação interna)</label>
+              <Input
+                placeholder={eff.ai_fast_model}
+                value={form.ai_fast_model}
+                onChange={set("ai_fast_model")}
+                className="text-xs font-mono h-8"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5 justify-end">
+              <p className="text-[11px] text-muted-foreground leading-tight pb-1.5">
+                Usado nas tarefas internas de triagem e avaliação (não vai ao cliente).
+                Um modelo barato aqui reduz bastante o consumo de cota.
+              </p>
             </div>
           </div>
 

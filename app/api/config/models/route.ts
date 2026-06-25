@@ -21,6 +21,7 @@ export const dynamic = "force-dynamic"
 const DEFAULT_CHAT_BASE_URL  = "https://api.groq.com/openai/v1"
 const DEFAULT_CHAT_MODEL     = "meta-llama/llama-4-scout-17b-16e-instruct"
 const DEFAULT_CURATOR_MODEL  = "meta-llama/llama-4-maverick-17b-128e-instruct"
+const DEFAULT_FAST_MODEL     = "llama-3.1-8b-instant"
 const DEFAULT_EMBED_BASE_URL = "https://api.jina.ai/v1"
 const DEFAULT_EMBED_MODEL    = "jina-embeddings-v5-text-small"
 const DEFAULT_EMBED_DIMS     = "1024"
@@ -47,6 +48,7 @@ export async function GET(request: Request) {
     ai_base_url        : raw["ai.base_url"]         || process.env.AI_BASE_URL         || DEFAULT_CHAT_BASE_URL,
     ai_chat_model      : raw["ai.chat_model"]        || process.env.AI_CHAT_MODEL        || DEFAULT_CHAT_MODEL,
     ai_curator_model   : raw["ai.curator_model"]     || process.env.AI_CURATOR_MODEL     || DEFAULT_CURATOR_MODEL,
+    ai_fast_model      : raw["ai.fast_model"]         || process.env.AI_FAST_MODEL        || DEFAULT_FAST_MODEL,
     ai_api_key_set     : !!(raw["ai.api_key"]        || process.env.AI_API_KEY           || process.env.GROQ_API_KEY),
     ai_api_key_masked  : maskKey(raw["ai.api_key"]   || process.env.AI_API_KEY           || process.env.GROQ_API_KEY || ""),
     ai_api_key_source  : raw["ai.api_key"] ? "db" : (process.env.AI_API_KEY || process.env.GROQ_API_KEY) ? "env" : "none",
