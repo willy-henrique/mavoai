@@ -137,7 +137,7 @@ tests/                           # vitest (unit) + playwright (e2e)
 - **Embeddings**: `EMBEDDING_BASE_URL`, `EMBEDDING_API_KEY`, `AI_EMBEDDING_MODEL`, `AI_EMBEDDING_DIMENSIONS`, `AI_EMBEDDING_TASK`
 - **Fallback LLM**: `GOOGLE_API_KEY`, `OPENROUTER_API_KEY`, `XAI_API_KEY`
 - **Banco/Supabase**: `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
-- **Canais**: `WILLTALK_*`, `MTALK_*`, `N8N_WEBHOOK_*`, `OBSIDIAN_*`
+- **Canais**: `WILLTALK_*`, `MTALK_*` (inclui `MTALK_REPLY_TIMEOUT_MS` — corte p/ resposta assíncrona, default 9000), `N8N_WEBHOOK_*`, `OBSIDIAN_*`
 - **Plataforma**: `CEREBRO_INTERNAL_TOKEN`, `CEREBRO_INGEST_TOKEN`, `API_RATE_LIMIT_PER_MINUTE`, `ADMIN_PASSWORD`, `MANAGER_PASSWORD` (senha do Gerente de Curadoria), `ADMIN_SESSION_SECRET`, `INTEGRATION_AUTH_REQUIRED`, `ENABLE_AI_ROUTER`
 
 ---
@@ -156,6 +156,8 @@ Causas prováveis, em ordem — confirme nos logs (`app/api/admin/logs` ou `lib/
 3. **Reasoning model (`gpt-oss-120b`) ligado pelo painel.** ⚠ Armadilha: é reasoning, e o `content` pode vir **vazio**
    (todo o orçamento de tokens consumido no raciocínio) → `throw "Resposta de chat invalida"` → "não responde"; ou vir com `<think>` cru → "sem nexo". `max_completion_tokens` atual = 4096. Se for usar reasoning, tratar `reasoning_format`/`reasoning_effort` e o caso de content vazio em `lib/ai-provider.ts`.
 4. **JSON do classificador não parseia** (`evaluateInvestigationTurn`) → cai em `"insuficiente"` → pergunta genérica que "não tem a ver". Log: `investigation_eval_unparseable`.
+
+5. **WhatsApp (MTalk webhook) "a 2ª mensagem não responde, a próxima sim".** O webhook ([app/api/ingestao/mtalk/route.ts](app/api/ingestao/mtalk/route.ts)) é síncrono: o MTalk espera a resposta HTTP. Quando a geração demora além do timeout do MTalk (rate-limit do Groq fazendo `sleep`/retries por vários segundos), o MTalk desiste → **vácuo**; na próxima mensagem a cota tokens/min já liberou → responde. **Corrigido (2026-06-25):** o webhook agora tem timeout-guard (`MTALK_REPLY_TIMEOUT_MS`, default 9s) — se passar disso, libera o webhook e envia a resposta real de forma **assíncrona** via `enviarRespostaParaMTalk` (`after()`), em vez de pendurar. Obs.: o MTalk **não usa o orquestrador** — usa `gerarRespostaWhatsApp` ([lib/assisted-response.ts](lib/assisted-response.ts)) + memória ([lib/whatsapp-memory.ts](lib/whatsapp-memory.ts)).
 
 Correções de robustez a considerar (validar com testes): garantir fallback de provedor configurado; reduzir nº de chamadas de LLM por turno; tratar `content` vazio (retry/usar `reasoning`) em vez de erro seco; alertar quando a cota Jina cair.
 

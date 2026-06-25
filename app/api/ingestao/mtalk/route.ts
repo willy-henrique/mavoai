@@ -31,6 +31,7 @@ import {
   SYSTEM_PROMPT_WHATSAPP,
 } from "@/lib/assisted-response"
 import { analisarImagemIA, transcreverAudioIA } from "@/lib/ai-provider"
+import { enviarRespostaParaMTalk } from "@/lib/mtalk-reply"
 import {
   carregarConversa,
   salvarConversa,
@@ -87,8 +88,11 @@ export async function POST(request: Request) {
     return mtalkSilencio()
   }
 
-  // Dispara a transferência para um atendente humano.
-  async function transferirParaHumano(textoUsuario: string, motivo: string) {
+  // Transfere para um atendente humano — retorna o texto (sem empacotar em HTTP).
+  async function transferirParaHumano(
+    textoUsuario: string,
+    motivo: string,
+  ): Promise<{ texto: string }> {
     conversa.messages.push({ role: "user", content: textoUsuario })
     await marcarHandoff(ticketId, conversa)
     logger.info("mtalk_handoff", { ticketId, motivo })
@@ -103,11 +107,12 @@ export async function POST(request: Request) {
       summary: `Cliente: ${contactName}. Última mensagem: "${textoUsuario.slice(0, 280)}".`,
       reason: motivo,
     }).catch(() => undefined)
-    return mtalkResponse(MSG_HANDOFF)
+    return { texto: MSG_HANDOFF }
   }
 
-  // Conversa com memória: gera resposta, ou escala se a IA não resolver.
-  async function responderComMemoria(textoUsuario: string) {
+  // Núcleo: produz o TEXTO da resposta (memória + escalação). Separado do envio HTTP
+  // para poder responder de forma síncrona OU assíncrona (ver caminho de texto).
+  async function produzirResposta(textoUsuario: string): Promise<{ texto: string }> {
     // Pedido explícito de humano → transfere na hora
     if (pediuHumano(textoUsuario)) {
       return transferirParaHumano(textoUsuario, "cliente_pediu_humano")
@@ -123,7 +128,13 @@ export async function POST(request: Request) {
     conversa.messages.push({ role: "assistant", content: resposta })
     await salvarConversa(ticketId, conversa)
     logger.info("mtalk_resposta_ok", { ticketId, contactName, len: resposta.length, turnos: conversa.messages.length })
-    return mtalkResponse(resposta)
+    return { texto: resposta }
+  }
+
+  // Wrapper síncrono (usado pelos caminhos de áudio).
+  async function responderComMemoria(textoUsuario: string) {
+    const { texto } = await produzirResposta(textoUsuario)
+    return mtalkResponse(texto)
   }
 
   // ── ÁUDIO: transcreve com Whisper → entra no fluxo conversacional ─────────
@@ -213,10 +224,37 @@ export async function POST(request: Request) {
     }
   })
 
-  try {
-    return await responderComMemoria(mensagem)
-  } catch (err) {
+  // Garante resposta dentro do timeout do webhook MTalk. Se a IA demorar (ex.: rate
+  // limit do Groq com retries de vários segundos), NÃO deixamos o cliente no vácuo:
+  // liberamos o webhook e enviamos a resposta real de forma ASSÍNCRONA pela API do MTalk.
+  // Essa é a causa do "a 2ª mensagem não responde, a próxima sim".
+  const REPLY_TIMEOUT_MS = Number(process.env.MTALK_REPLY_TIMEOUT_MS) || 9000
+
+  // `gen` nunca rejeita — em erro, vira uma mensagem amigável (em vez de 500/vácuo).
+  const gen = produzirResposta(mensagem).catch((err) => {
     logger.warn("mtalk_ia_erro", { ticketId, error: err instanceof Error ? err.message : String(err) })
-    return mtalkError("Tive um probleminha aqui pra processar. Pode mandar de novo?")
+    return { texto: "Tive um probleminha aqui pra processar. Pode mandar de novo?" }
+  })
+
+  const corrida = await Promise.race([
+    gen.then((r) => ({ pronto: true as const, texto: r.texto })),
+    new Promise<{ pronto: false }>((resolve) => setTimeout(() => resolve({ pronto: false }), REPLY_TIMEOUT_MS)),
+  ])
+
+  if (corrida.pronto) {
+    return mtalkResponse(corrida.texto)
   }
+
+  // Demorou demais → libera o webhook (evita o vácuo) e entrega a resposta real depois.
+  logger.warn("mtalk_reply_async", { ticketId })
+  after(async () => {
+    try {
+      const { texto } = await gen
+      await enviarRespostaParaMTalk({ number: contactId, content: comCabecalhoMavo(texto) })
+      logger.info("mtalk_reply_async_enviado", { ticketId })
+    } catch (e) {
+      logger.warn("mtalk_reply_async_erro", { ticketId, error: e instanceof Error ? e.message : String(e) })
+    }
+  })
+  return mtalkSilencio()
 }
