@@ -11,6 +11,7 @@ import {
   Database,
   KeyRound,
   LayoutDashboard,
+  Library,
   List,
   LogOut,
   Network,
@@ -28,6 +29,7 @@ import { CerebroGrafo } from "@/components/cerebro-grafo"
 import { Dashboard } from "@/components/dashboard"
 import { EmpresasPanel } from "@/components/empresas-panel"
 import { GroqMotorStrip } from "@/components/groq-motor-strip"
+import { ConhecimentoPanel } from "@/components/conhecimento-panel"
 import { HubPanel } from "@/components/hub-panel"
 import { PlatformasPanel } from "@/components/plataformas-panel"
 import { AiHealthCard } from "@/components/ai-health-card"
@@ -68,6 +70,12 @@ const NAV_TABS = [
     label: "Atendimentos",
     description: "Histórico",
     icon: List,
+  },
+  {
+    value: "conhecimento",
+    label: "Conhecimento",
+    description: "Curar a base",
+    icon: Library,
   },
   {
     value: "plataformas",
@@ -277,7 +285,7 @@ export default function Home() {
           </div>
 
           <div className="border-t border-slate-100 px-4 py-2 lg:hidden">
-            <TabsList className="grid h-auto w-full grid-cols-11 gap-1 rounded-lg bg-slate-100 p-1">
+            <TabsList className="grid h-auto w-full grid-cols-6 gap-1 rounded-lg bg-slate-100 p-1">
               {NAV_TABS.map(({ value, label, icon: Icon }) => (
                 <TabsTrigger
                   key={value}
@@ -331,6 +339,16 @@ export default function Home() {
                 description="Casos processados, pendentes e base de conhecimento."
               />
               <AtendimentosList refreshKey={refreshKey} />
+            </TabsContent>
+
+            <TabsContent value="conhecimento" className="mt-0">
+              <WorkspaceHeader
+                icon={Library}
+                label="Curadoria"
+                title="Gestão de Conhecimento"
+                description="Revise a base do RAG e remova o que está errado, desatualizado ou duplicado — a IA para de usar na hora."
+              />
+              <ConhecimentoPanel />
             </TabsContent>
 
             <TabsContent value="plataformas" className="mt-0">
