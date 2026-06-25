@@ -20,11 +20,11 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password }),
       })
+      const data = await res.json().catch(() => ({}))
       if (res.ok) {
-        window.location.href = "/"
+        window.location.href = typeof data?.redirect === "string" ? data.redirect : "/"
         return
       }
-      const data = await res.json().catch(() => ({}))
       if (res.status === 503) {
         setError("ADMIN_PASSWORD não está configurada no servidor.")
       } else {

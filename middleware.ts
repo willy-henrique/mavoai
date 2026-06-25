@@ -1,18 +1,16 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
-import { ADMIN_COOKIE, verifySessionToken, safeEqual } from "@/lib/admin-auth"
+import { ADMIN_COOKIE, getSession, safeEqual } from "@/lib/admin-auth"
 
 /**
- * Protege o PAINEL ADMIN com login (senha única).
+ * Protege o painel com login por senha + PAPEL (role).
  *
- * O matcher abaixo garante que o middleware roda APENAS em:
- *   - "/"                  → a página do painel
- *   - "/api/config/*"      → configuração de modelos/IA (sensível)
- *   - "/api/admin/*"       → endpoints administrativos (tokens, etc.)
+ * Áreas:
+ *   - "/" e /api/{config,admin,knowledge}  → SÓ papel "admin"
+ *   - "/manager/*" e /api/manager/*        → papel "admin" OU "gerente" (curadoria)
  *
  * Os webhooks de integração (/api/ingestao/*, /api/orquestrador/*, /api/v1/*,
- * /api/mtalk/*) NÃO são tocados — eles têm autenticação própria por token e
- * precisam continuar acessíveis para sistemas externos.
+ * /api/mtalk/*) NÃO são tocados — têm autenticação própria por token.
  */
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
@@ -22,33 +20,63 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next()
   }
 
-  const ok = await verifySessionToken(req.cookies.get(ADMIN_COOKIE)?.value)
+  const session = await getSession(req.cookies.get(ADMIN_COOKIE)?.value)
+  const isAdmin = session?.role === "admin"
+  const authed = !!session
 
-  // APIs sensíveis → exige sessão OU o token interno (hop servidor→servidor dos BFFs).
-  // /api/knowledge/* = treinamento do RAG (upload/indexação) — só admin.
-  if (
-    pathname.startsWith("/api/config") ||
-    pathname.startsWith("/api/admin") ||
-    pathname.startsWith("/api/knowledge")
-  ) {
-    if (ok) return NextResponse.next()
+  const internalOk = () => {
     const auth = req.headers.get("authorization") || ""
     const internal = process.env.CEREBRO_INTERNAL_TOKEN || ""
-    if (internal && safeEqual(auth, `Bearer ${internal}`)) return NextResponse.next()
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+    return !!internal && safeEqual(auth, `Bearer ${internal}`)
   }
 
-  // Página do painel → redireciona para /login quando não autenticado.
-  if (!ok) {
+  const redirectLogin = () => {
     const url = req.nextUrl.clone()
     url.pathname = "/login"
     url.search = ""
     return NextResponse.redirect(url)
   }
 
+  // ── APIs do módulo de curadoria → admin OU gerente (ou token interno) ──
+  if (pathname.startsWith("/api/manager")) {
+    if (authed || internalOk()) return NextResponse.next()
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  }
+
+  // ── APIs sensíveis do admin → SÓ admin (ou token interno hop servidor→servidor) ──
+  if (
+    pathname.startsWith("/api/config") ||
+    pathname.startsWith("/api/admin") ||
+    pathname.startsWith("/api/knowledge")
+  ) {
+    if (isAdmin || internalOk()) return NextResponse.next()
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  }
+
+  // ── Página do módulo de curadoria → admin ou gerente ──
+  if (pathname.startsWith("/manager")) {
+    if (authed) return NextResponse.next()
+    return redirectLogin()
+  }
+
+  // ── Página do painel admin "/" → só admin; gerente é mandado ao módulo dele ──
+  if (!authed) return redirectLogin()
+  if (!isAdmin) {
+    const url = req.nextUrl.clone()
+    url.pathname = "/manager/ai-curation"
+    url.search = ""
+    return NextResponse.redirect(url)
+  }
   return NextResponse.next()
 }
 
 export const config = {
-  matcher: ["/", "/api/config/:path*", "/api/admin/:path*", "/api/knowledge/:path*"],
+  matcher: [
+    "/",
+    "/manager/:path*",
+    "/api/config/:path*",
+    "/api/admin/:path*",
+    "/api/knowledge/:path*",
+    "/api/manager/:path*",
+  ],
 }

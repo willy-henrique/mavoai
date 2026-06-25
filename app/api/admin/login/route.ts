@@ -8,7 +8,7 @@ import { NextResponse } from "next/server"
 import {
   ADMIN_COOKIE,
   adminPasswordConfigured,
-  checkPassword,
+  authenticate,
   createSessionToken,
   sessionCookieOptions,
 } from "@/lib/admin-auth"
@@ -31,11 +31,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 })
   }
 
-  if (!checkPassword(password)) {
+  const role = authenticate(password)
+  if (!role) {
     return NextResponse.json({ error: "senha_invalida" }, { status: 401 })
   }
 
-  const res = NextResponse.json({ ok: true })
-  res.cookies.set(ADMIN_COOKIE, await createSessionToken(), sessionCookieOptions())
+  const redirect = role === "gerente" ? "/manager/ai-curation" : "/"
+  const res = NextResponse.json({ ok: true, role, redirect })
+  res.cookies.set(ADMIN_COOKIE, await createSessionToken(role), sessionCookieOptions())
   return res
 }

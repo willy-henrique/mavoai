@@ -11,8 +11,15 @@
  *
  * Secrets envolvidos:
  *   ADMIN_PASSWORD        — a senha de admin (obrigatória; sem ela, ninguém entra)
+ *   MANAGER_PASSWORD      — senha do Gerente de Curadoria (opcional; acessa só /manager/*)
  *   ADMIN_SESSION_SECRET  — chave p/ assinar o cookie (fallback: CEREBRO_INTERNAL_TOKEN)
+ *
+ * Papéis (role no cookie): "admin" acessa tudo; "gerente" acessa só o módulo de
+ * curadoria (/manager/*). O cookie é `<exp>:<role>.<hmac>`; cookies legados no
+ * formato `<exp>.<hmac>` continuam válidos e são tratados como "admin".
  */
+
+export type Role = "admin" | "gerente"
 
 export const ADMIN_COOKIE = "mavo_admin"
 /** Sessão válida por 7 dias. */
@@ -63,31 +70,61 @@ export function adminPasswordConfigured(): boolean {
   return !!(process.env.ADMIN_PASSWORD && process.env.ADMIN_PASSWORD.length > 0)
 }
 
-/** Confere a senha enviada no login. */
+/** Confere a senha enviada no login (compat — só admin). */
 export function checkPassword(input: string): boolean {
   const expected = process.env.ADMIN_PASSWORD || ""
   if (!expected) return false
   return safeEqual(input, expected)
 }
 
-/** Cria o valor do cookie de sessão (`<exp>.<hmac>`). */
-export async function createSessionToken(): Promise<string> {
-  const exp = String(Date.now() + TTL_MS)
-  const sig = await sign(exp)
-  return `${exp}.${sig}`
+/** true se houver uma senha de gerente de curadoria configurada. */
+export function managerPasswordConfigured(): boolean {
+  return !!(process.env.MANAGER_PASSWORD && process.env.MANAGER_PASSWORD.length > 0)
 }
 
-/** Valida o cookie de sessão: assinatura correta + não expirado. */
-export async function verifySessionToken(token: string | undefined | null): Promise<boolean> {
-  if (!token) return false
-  const dot = token.indexOf(".")
-  if (dot <= 0) return false
+/**
+ * Autentica a senha e retorna o papel correspondente, ou null se não bater.
+ * Admin tem precedência (se as duas senhas forem iguais, vira admin).
+ */
+export function authenticate(input: string): Role | null {
+  const admin = process.env.ADMIN_PASSWORD || ""
+  const manager = process.env.MANAGER_PASSWORD || ""
+  if (admin && safeEqual(input, admin)) return "admin"
+  if (manager && safeEqual(input, manager)) return "gerente"
+  return null
+}
+
+/** Cria o valor do cookie de sessão (`<exp>:<role>.<hmac>`). */
+export async function createSessionToken(role: Role = "admin"): Promise<string> {
+  const payload = `${Date.now() + TTL_MS}:${role}`
+  const sig = await sign(payload)
+  return `${payload}.${sig}`
+}
+
+/**
+ * Valida o cookie e retorna a sessão (papel), ou null se inválido/expirado.
+ * Usa o ÚLTIMO ponto como separador (o hmac é hex, sem ponto). Cookies legados
+ * no formato `<exp>.<hmac>` continuam válidos e são tratados como "admin".
+ */
+export async function getSession(token: string | undefined | null): Promise<{ role: Role } | null> {
+  if (!token) return null
+  const dot = token.lastIndexOf(".")
+  if (dot <= 0) return null
   const payload = token.slice(0, dot)
   const sig = token.slice(dot + 1)
-  const exp = Number(payload)
-  if (!Number.isFinite(exp) || exp < Date.now()) return false
   const expected = await sign(payload)
-  return safeEqual(sig, expected)
+  if (!safeEqual(sig, expected)) return null
+  const sep = payload.indexOf(":")
+  const expStr = sep === -1 ? payload : payload.slice(0, sep)
+  const roleStr = sep === -1 ? "admin" : payload.slice(sep + 1)
+  const exp = Number(expStr)
+  if (!Number.isFinite(exp) || exp < Date.now()) return null
+  return { role: roleStr === "gerente" ? "gerente" : "admin" }
+}
+
+/** Valida o cookie de sessão: assinatura correta + não expirado (qualquer papel). */
+export async function verifySessionToken(token: string | undefined | null): Promise<boolean> {
+  return (await getSession(token)) !== null
 }
 
 /** Opções padrão do cookie de sessão. */
