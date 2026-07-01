@@ -32,11 +32,24 @@ const PLATFORM = "whatsapp"
 /** Mantém os últimos N turnos (~5 trocas) — contexto suficiente e menos tokens/chamada. */
 const MAX_TURNS = 10
 
-const VAZIA: WhatsAppConversa = { messages: [], handoff: false }
+/**
+ * Retorna uma conversa vazia NOVA a cada chamada — NUNCA reutilizar um objeto/array
+ * módulo-level aqui. BUG CRÍTICO corrigido em 2026-07-01: antes disto existia uma
+ * constante `VAZIA` compartilhada e `{ ...VAZIA }` fazia cópia RASA — `messages`
+ * continuava apontando pro MESMO array em toda "conversa nova". Como o resto do
+ * código faz `conversa.messages.push(...)` diretamente (mutação in-place), a
+ * primeira conversa nova de um processo Node de vida longa (Render nunca reinicia
+ * por request) "contaminava" esse array compartilhado pra sempre — e TODO cliente
+ * novo daquele processo em diante herdava o histórico (e possivelmente dados) de
+ * clientes anteriores completamente diferentes. Vazamento de dados entre clientes.
+ */
+function conversaVazia(): WhatsAppConversa {
+  return { messages: [], handoff: false }
+}
 
 /** Carrega o histórico + estado de handoff de um ticket. Falha silenciosa → conversa vazia. */
 export async function carregarConversa(ticketId: string): Promise<WhatsAppConversa> {
-  if (!ticketId) return { ...VAZIA }
+  if (!ticketId) return conversaVazia()
   try {
     const r = await query(
       `SELECT state FROM public.conversation_sessions
@@ -44,7 +57,7 @@ export async function carregarConversa(ticketId: string): Promise<WhatsAppConver
         LIMIT 1`,
       [ticketId, TENANT],
     )
-    if (r.rows.length === 0) return { ...VAZIA }
+    if (r.rows.length === 0) return conversaVazia()
     const s = r.rows[0].state as Partial<WhatsAppConversa> | null
     return {
       messages: Array.isArray(s?.messages) ? (s!.messages as ChatTurn[]) : [],
@@ -55,7 +68,7 @@ export async function carregarConversa(ticketId: string): Promise<WhatsAppConver
     }
   } catch (e) {
     logger.warn("wa_memory_load_error", { ticketId, error: e instanceof Error ? e.message : String(e) })
-    return { ...VAZIA }
+    return conversaVazia()
   }
 }
 
