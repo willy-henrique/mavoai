@@ -1,6 +1,19 @@
 import { logger } from "@/lib/logger"
 import { getSecret } from "@/lib/secret-store"
 
+/**
+ * TRAVA DE SEGURANÇA (2026-07-01): envio real só em produção (mesmo motivo do
+ * MTalk — ver lib/mtalk-reply.ts). Dev/local NÃO dispara mensagem real de WhatsApp.
+ * Forçar em dev: WILLTALK_ALLOW_SEND_IN_DEV=true (ou o global MTALK_ALLOW_SEND_IN_DEV).
+ */
+function envioRealPermitido(): boolean {
+  if (process.env.NODE_ENV === "production") return true
+  return (
+    process.env.WILLTALK_ALLOW_SEND_IN_DEV === "true" ||
+    process.env.MTALK_ALLOW_SEND_IN_DEV === "true"
+  )
+}
+
 // ─── Modo direto (igual ao MTalk) ─────────────────────────────────────────────
 // Se WILLTALK_API_URL + WILLTALK_API_TOKEN estiverem configurados,
 // envia a resposta direto para a API WillTalk via número de telefone.
@@ -22,6 +35,14 @@ interface WillTalkWebhookInput {
 export async function enviarRespostaParaWillTalk(
   input: WillTalkWebhookInput & { number?: string },
 ): Promise<void> {
+  if (!envioRealPermitido()) {
+    logger.warn("willtalk_reply_bloqueado_dev", {
+      ticketId: input.ticketId,
+      motivo: "envio real desabilitado fora de producao (trava anti-restricao)",
+    })
+    return
+  }
+
   // Credenciais editáveis pelo painel (banco → env).
   const apiUrl   = await getSecret("WILLTALK_API_URL")
   const apiToken = await getSecret("WILLTALK_API_TOKEN")
