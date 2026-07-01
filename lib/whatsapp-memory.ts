@@ -23,6 +23,8 @@ export type WhatsAppConversa = {
   ultimaMsgHash?: string
   /** Epoch ms de quando `ultimaMsgHash` foi processado. */
   ultimaMsgEm?: number
+  /** Texto da última resposta enviada — se um retry/duplicata cair na janela de dedupe, REENVIA isto em vez de ficar em silêncio. */
+  ultimaRespostaTexto?: string
 }
 
 const TENANT = "default"
@@ -49,6 +51,7 @@ export async function carregarConversa(ticketId: string): Promise<WhatsAppConver
       handoff: !!s?.handoff,
       ultimaMsgHash: typeof s?.ultimaMsgHash === "string" ? s.ultimaMsgHash : undefined,
       ultimaMsgEm: typeof s?.ultimaMsgEm === "number" ? s.ultimaMsgEm : undefined,
+      ultimaRespostaTexto: typeof s?.ultimaRespostaTexto === "string" ? s.ultimaRespostaTexto : undefined,
     }
   } catch (e) {
     logger.warn("wa_memory_load_error", { ticketId, error: e instanceof Error ? e.message : String(e) })
@@ -64,6 +67,7 @@ export async function salvarConversa(ticketId: string, conversa: WhatsAppConvers
     handoff: conversa.handoff,
     ultimaMsgHash: conversa.ultimaMsgHash,
     ultimaMsgEm: conversa.ultimaMsgEm,
+    ultimaRespostaTexto: conversa.ultimaRespostaTexto,
   }
   try {
     await query(

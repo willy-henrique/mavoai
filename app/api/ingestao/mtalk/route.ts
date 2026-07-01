@@ -115,6 +115,8 @@ export async function POST(request: Request) {
     motivo: string,
   ): Promise<{ texto: string }> {
     conversa.messages.push({ role: "user", content: textoUsuario })
+    const texto = escolherMsgHandoff()
+    conversa.ultimaRespostaTexto = texto
     await marcarHandoff(ticketId, conversa)
     logger.info("mtalk_handoff", { ticketId, motivo })
     // Notifica o suporte (fire-and-forget; silencioso se não houver webhook configurado)
@@ -128,7 +130,7 @@ export async function POST(request: Request) {
       summary: `Cliente: ${contactName}. Última mensagem: "${textoUsuario.slice(0, 280)}".`,
       reason: motivo,
     }).catch(() => undefined)
-    return { texto: escolherMsgHandoff() }
+    return { texto }
   }
 
   // Núcleo: produz o TEXTO da resposta (memória + escalação). Separado do envio HTTP
@@ -147,6 +149,7 @@ export async function POST(request: Request) {
     // Salva o turno (usuário + IA) na memória
     conversa.messages.push({ role: "user", content: textoUsuario })
     conversa.messages.push({ role: "assistant", content: resposta })
+    conversa.ultimaRespostaTexto = resposta
     await salvarConversa(ticketId, conversa)
     logger.info("mtalk_resposta_ok", { ticketId, contactName, len: resposta.length, turnos: conversa.messages.length })
     return { texto: resposta }
@@ -215,13 +218,22 @@ export async function POST(request: Request) {
   if (!mensagem) return mtalkError("Não recebi nenhuma mensagem. Pode tentar novamente?")
 
   // Dedupe de retry do webhook: MESMO ticket + MESMO texto dentro de uma janela curta
-  // = o MTalk reenviando o evento (não o cliente repetindo a pergunta minutos depois).
-  // Sem isso, um retry gera uma segunda resposta idêntica saindo pro cliente.
+  // = provavelmente o MTalk reenviando o evento (ex.: timeout de rede do lado dele).
+  // MAS pode também ser o cliente repetindo a pergunta de verdade (impaciente, ou o
+  // app dele reenviando) — por isso NUNCA respondemos com silêncio aqui: reenviamos a
+  // ÚLTIMA resposta já dada. Bug real corrigido em 2026-07-01: a versão anterior usava
+  // mtalkSilencio() e isso deixava o cliente sem NENHUMA resposta na repetição (parecia
+  // a IA "travada" — ver conversation_sessions do ticket, turnos pararam de crescer).
   const msgHash = hashMensagem(mensagem)
   const agoraMs = Date.now()
-  if (conversa.ultimaMsgHash === msgHash && conversa.ultimaMsgEm && agoraMs - conversa.ultimaMsgEm < DEDUPE_JANELA_MS) {
-    logger.warn("mtalk_mensagem_duplicada_ignorada", { ticketId, msgHash })
-    return mtalkSilencio()
+  if (
+    conversa.ultimaMsgHash === msgHash &&
+    conversa.ultimaMsgEm &&
+    agoraMs - conversa.ultimaMsgEm < DEDUPE_JANELA_MS &&
+    conversa.ultimaRespostaTexto
+  ) {
+    logger.warn("mtalk_mensagem_duplicada_reenviada", { ticketId, msgHash })
+    return mtalkResponse(conversa.ultimaRespostaTexto)
   }
   conversa.ultimaMsgHash = msgHash
   conversa.ultimaMsgEm = agoraMs
