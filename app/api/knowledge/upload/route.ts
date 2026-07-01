@@ -1,4 +1,5 @@
 import { query } from "@/lib/database/postgres-client-no-vector"
+import { chunkPorExtensao, extrairTextoDeArquivo } from "@/lib/document-chunker"
 import { NextResponse } from "next/server"
 
 export const dynamic = "force-dynamic"
@@ -7,90 +8,6 @@ export const maxDuration = 120
 const EMBEDDING_KEY = process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY
 const EMBEDDING_BASE = process.env.EMBEDDING_BASE_URL || "https://api.openai.com/v1"
 const EMBEDDING_MODEL = process.env.AI_EMBEDDING_MODEL || "text-embedding-3-small"
-const MAX_CHUNK_CHARS = 3200
-
-// ─── Chunking ─────────────────────────────────────────────────────────────────
-
-function chunkMarkdown(text: string, source: string) {
-  const lines = text.split("\n")
-  const chunks: Array<{ titulo: string; conteudo: string; texto_original: string }> = []
-  let currentTitle = source
-  let currentLines: string[] = []
-  let partIdx = 0
-
-  function flush() {
-    const body = currentLines.join("\n").trim()
-    if (body.length < 50) return
-
-    if (body.length > MAX_CHUNK_CHARS) {
-      const paragraphs = body.split(/\n{2,}/)
-      let buf: string[] = []
-      let bufLen = 0
-      function flushBuf() {
-        const part = buf.join("\n\n").trim()
-        if (part.length < 50) return
-        partIdx++
-        const titulo = `${currentTitle} (parte ${partIdx})`
-        chunks.push({ titulo, conteudo: part, texto_original: `[${titulo}]\n\n${part}` })
-        buf = []
-        bufLen = 0
-      }
-      for (const para of paragraphs) {
-        if (bufLen + para.length > MAX_CHUNK_CHARS && buf.length > 0) flushBuf()
-        buf.push(para)
-        bufLen += para.length + 2
-      }
-      flushBuf()
-    } else {
-      partIdx++
-      const titulo = chunks.length === 0 && partIdx === 1
-        ? currentTitle
-        : `${currentTitle} (parte ${partIdx})`
-      chunks.push({ titulo, conteudo: body, texto_original: `[${titulo}]\n\n${body}` })
-    }
-    currentLines = []
-  }
-
-  for (const line of lines) {
-    const h2 = line.match(/^## (.+)/)
-    const h3 = line.match(/^### (.+)/)
-    if (h2 || h3) {
-      flush()
-      currentTitle = (h2 || h3)![1].trim()
-      partIdx = 0
-    } else if (line.trim() !== "---") {
-      currentLines.push(line)
-    }
-  }
-  flush()
-  return chunks
-}
-
-function chunkPlainText(text: string, source: string) {
-  const paragraphs = text.split(/\n{2,}/).filter((p) => p.trim().length > 80)
-  const chunks: Array<{ titulo: string; conteudo: string; texto_original: string }> = []
-  let buf: string[] = []
-  let bufLen = 0
-  let idx = 0
-
-  function flush() {
-    const body = buf.join("\n\n").trim()
-    if (body.length < 50) return
-    idx++
-    const titulo = `${source} (parte ${idx})`
-    chunks.push({ titulo, conteudo: body, texto_original: `[${titulo}]\n\n${body}` })
-    buf = []
-    bufLen = 0
-  }
-
-  for (const para of paragraphs) {
-    if (bufLen + para.length > MAX_CHUNK_CHARS && buf.length > 0) flush()
-    buf.push(para)
-    bufLen += para.length + 2
-  }
-  flush()
-  return chunks
-}
 
 // ─── Embedding ────────────────────────────────────────────────────────────────
 
@@ -136,21 +53,12 @@ export async function POST(request: Request) {
 
   let text = ""
   try {
-    if (fileName.endsWith(".pdf")) {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pdfParse = require("pdf-parse/lib/pdf-parse")
-      const parsed = await pdfParse(buffer)
-      text = parsed.text as string
-    } else {
-      text = buffer.toString("utf-8")
-    }
+    text = await extrairTextoDeArquivo(fileName, buffer)
   } catch (e) {
     return NextResponse.json({ error: `parse_failed: ${e instanceof Error ? e.message : String(e)}` }, { status: 422 })
   }
 
-  const chunks = fileName.endsWith(".md")
-    ? chunkMarkdown(text, source)
-    : chunkPlainText(text, source)
+  const chunks = chunkPorExtensao(fileName, text, source)
 
   if (chunks.length === 0) {
     return NextResponse.json({ error: "no_content_extracted", total_chunks: 0, inserted: 0, skipped: 0, errors: 0 }, { status: 422 })

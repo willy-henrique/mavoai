@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import useSWR from "swr"
 import {
   Card,
@@ -45,6 +45,8 @@ import {
   Trash2,
   BrainCircuit,
   AlertTriangle,
+  Upload,
+  FileText,
 } from "lucide-react"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -287,6 +289,103 @@ function CapturarArea() {
             Gerar rascunho
           </Button>
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ─── Importar documento (PDF/DOCX/MD/TXT → rascunhos por seção) ────────────────
+
+interface ImportResult {
+  arquivo: string
+  total_chunks: number
+  inserted: number
+  skipped: number
+  errors: number
+}
+
+function ImportarDocumentoArea() {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [enviando, setEnviando] = useState(false)
+  const [resultados, setResultados] = useState<ImportResult[]>([])
+  const [erro, setErro] = useState<string | null>(null)
+
+  const enviarArquivos = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return
+    setEnviando(true)
+    setErro(null)
+    const novos: ImportResult[] = []
+    for (const file of Array.from(fileList)) {
+      try {
+        const form = new FormData()
+        form.append("file", file)
+        const res = await fetch("/api/manager/curation/import", { method: "POST", body: form })
+        const j = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(j.detail || j.error || `status ${res.status}`)
+        novos.push(j as ImportResult)
+      } catch (e) {
+        setErro(`Falha ao importar "${file.name}": ${e instanceof Error ? e.message : "erro"}`)
+      }
+    }
+    setResultados((prev) => [...novos, ...prev])
+    setEnviando(false)
+    if (inputRef.current) inputRef.current.value = ""
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <FileText className="h-5 w-5 text-blue-600" />
+          Importar documento (PDF, Word, Markdown, TXT)
+        </CardTitle>
+        <CardDescription>
+          Suba um manual, procedimento ou FAQ inteiro. O documento é quebrado em seções e cada seção vira um
+          <strong> Rascunho</strong> — passa pela mesma revisão/sandbox antes de publicar, igual à dobradinha.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <div
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => { e.preventDefault(); enviarArquivos(e.dataTransfer.files) }}
+          onClick={() => inputRef.current?.click()}
+          className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-muted-foreground/25 bg-muted/20 px-4 py-8 text-center transition hover:border-blue-300 hover:bg-blue-50/40"
+        >
+          <Upload className="h-6 w-6 text-muted-foreground" />
+          <p className="text-sm font-medium">Arraste o arquivo aqui ou clique para escolher</p>
+          <p className="text-xs text-muted-foreground">PDF, Word (.docx), TXT ou Markdown — pode selecionar vários</p>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".pdf,.docx,.md,.markdown,.txt"
+            multiple
+            className="hidden"
+            onChange={(e) => enviarArquivos(e.target.files)}
+          />
+        </div>
+
+        {enviando && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Spinner className="h-4 w-4" /> Processando documento...
+          </div>
+        )}
+
+        {erro && (
+          <div className="flex items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-700 dark:bg-red-950 dark:text-red-200">
+            <AlertTriangle className="h-4 w-4" /> {erro}
+          </div>
+        )}
+
+        {resultados.map((r, i) => (
+          <div key={i} className="flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-200">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            <span>
+              <strong>{r.arquivo}</strong>: {r.inserted} rascunho(s) criado(s) de {r.total_chunks} seção(ões)
+              {r.skipped > 0 ? `, ${r.skipped} já existiam` : ""}
+              {r.errors > 0 ? `, ${r.errors} com erro` : ""}. Revise em &quot;Revisão&quot;.
+            </span>
+          </div>
+        ))}
       </CardContent>
     </Card>
   )
@@ -683,7 +782,12 @@ export function CurationModule() {
           </TabsList>
 
           <TabsContent value="dashboard"><DashboardArea /></TabsContent>
-          <TabsContent value="capturar"><CapturarArea /></TabsContent>
+          <TabsContent value="capturar">
+            <div className="flex flex-col gap-6">
+              <CapturarArea />
+              <ImportarDocumentoArea />
+            </div>
+          </TabsContent>
           <TabsContent value="revisao">
             <ListaArea
               statuses={["rascunho", "em_teste"]}

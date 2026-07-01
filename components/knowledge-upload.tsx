@@ -34,7 +34,7 @@ type UploadResult = {
 }
 
 const TENANT = "auge"
-const ACCEPT = ".pdf,.txt,.md,.markdown"
+const ACCEPT = ".pdf,.txt,.md,.markdown,.docx"
 
 interface Props {
   onTrained?: () => void
@@ -132,7 +132,7 @@ export function KnowledgeUpload({ onTrained }: Props) {
           <div>
             <CardTitle className="text-base">Treinar a IA com documentos</CardTitle>
             <CardDescription>
-              Suba PDF, TXT ou Markdown. O conteúdo é quebrado, indexado (embeddings) e a IA passa a usar nas respostas — sem deploy.
+              Suba PDF, Word (.docx), TXT ou Markdown. O conteúdo é quebrado, indexado (embeddings) e a IA passa a usar nas respostas — sem deploy.
             </CardDescription>
           </div>
         </div>
@@ -147,7 +147,7 @@ export function KnowledgeUpload({ onTrained }: Props) {
         >
           <Upload className="size-6 text-slate-400" />
           <p className="text-sm font-medium text-slate-700">Arraste arquivos aqui ou clique para escolher</p>
-          <p className="text-xs text-slate-500">PDF, TXT ou Markdown — pode selecionar vários</p>
+          <p className="text-xs text-slate-500">PDF, Word (.docx), TXT ou Markdown — pode selecionar vários</p>
           <input
             ref={inputRef}
             type="file"
