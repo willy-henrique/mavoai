@@ -295,8 +295,14 @@ export function pediuHumano(texto: string): boolean {
 const FINALIZACAO =
   /\b(deu certo|deu bom|consegui|resolv(i|ido|eu|emos|ida)|funcionou|deu boa|era isso( mesmo)?|ficou (bom|certo|show|ok)|tudo (certo|ok|funcionando|resolvido)|obrigad[oa]|valeu|perfeito|show( de bola)?|brigad[oa]|100%|ajudou)\b/i
 // Coisas que indicam que NÃO encerrou (continua o atendimento).
+// BUG corrigido em 2026-07-01: "reiniciei e não resolveu" batia em FINALIZACAO
+// (por causa de "resolveu") mas NÃO batia aqui — "não resolveu" não estava na lista
+// de negações, só "não consegui/deu/funcionou". A IA respondia "que bom que deu
+// certo!" pro cliente dizendo textualmente que NÃO deu certo. Regra de negação
+// generalizada (não + qualquer palavra perto de um gatilho de finalização) em vez
+// de listar par a par — mais robusto a variações que não foram previstas.
 const CONTINUACAO =
-  /\b(mas|por[ée]m|agora|outro|outra|ainda|n[ãa]o (consegui|deu|funcionou)|erro|falha|problema|d[úu]vida|como|onde|por que|porqu[eê]|qual)\b|\?/i
+  /\b(mas|por[ée]m|agora|outro|outra|ainda|n[ãa]o\s+\w*\s*(consegui|deu|funcionou|resolv|ajud|ficou|certo\b|bom\b|ok\b)|erro|falha|problema|d[úu]vida|como|onde|por que|porqu[eê]|qual)\b|\?/i
 
 /** true quando o cliente sinaliza que o problema foi resolvido (e não está reabrindo). */
 export function ehFinalizacao(texto: string): boolean {
