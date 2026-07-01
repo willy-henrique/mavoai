@@ -185,6 +185,21 @@ Exemplo do tom (não copie, varie): "Oi, Ana! Como posso te ajudar hoje?"`
   }
 
   const casosSimilares = await buscarSemantica(textoLimpo, 5)
+  return gerarRespostaComCasos(textoLimpo, audience, casosSimilares)
+}
+
+/**
+ * Mesma geração de resposta de `gerarRespostaAssistidaComContexto`, mas recebendo os
+ * casos JÁ BUSCADOS em vez de chamar `buscarSemantica` de novo. Extraído para o
+ * Sandbox/Modo Comparativo da Curadoria (lib/knowledge-sandbox.ts) poder simular
+ * "e se este item candidato estivesse publicado?" substituindo os casos, sem duplicar
+ * o prompt nem mexer no caminho de produção normal (que continua chamando buscarSemantica).
+ */
+export async function gerarRespostaComCasos(
+  textoLimpo: string,
+  audience: "atendente" | "cliente",
+  casosSimilares: ResultadoSemantico[],
+) {
   const casosCompactados = compactarCasos(casosSimilares)
   const confianca = calcularConfianca(casosSimilares)
   const topSimilaridade = Number(casosSimilares[0]?.similaridade || 0)

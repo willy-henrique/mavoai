@@ -32,6 +32,8 @@ describe("buscarSemantica", () => {
         },
       ],
     } as any)
+    // Segunda chamada em paralelo: busca em knowledge_items publicado (sem resultados neste teste)
+    vi.mocked(query).mockResolvedValueOnce({ rows: [] } as any)
 
     const resultado = await buscarSemantica("impressora com problema")
 

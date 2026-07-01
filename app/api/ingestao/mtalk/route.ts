@@ -40,8 +40,10 @@ import {
 } from "@/lib/whatsapp-memory"
 import { notifyHandoff } from "@/lib/handoff-notifier"
 import { logger } from "@/lib/logger"
+import { aguardarVagaEnvio, jitterHumano } from "@/lib/outbound-throttle"
 import { NextResponse } from "next/server"
 import { after } from "next/server"
+import { createHash } from "node:crypto"
 
 // Formato de resposta que o MTalk espera
 function mtalkResponse(texto: string) {
@@ -55,8 +57,27 @@ function mtalkSilencio() {
   return NextResponse.json([])
 }
 
-const MSG_HANDOFF =
-  "Já estou te conectando com um atendente, tá? Só um instante que alguém continua o atendimento por aqui."
+// Várias variações da mesma mensagem de handoff — texto idêntico enviado a muitos
+// números diferentes é a assinatura que os detectores de spam do WhatsApp reconhecem
+// (causa confirmada da restrição de conta em 2026-06-30). Ver lib/outbound-throttle.ts.
+const MSGS_HANDOFF = [
+  "Já estou te conectando com um atendente, tá? Só um instante que alguém continua o atendimento por aqui.",
+  "Vou te passar para um atendente agora, combinado? Só um instante que já continuam o papo por aqui.",
+  "Beleza, já acionei um atendente pra te ajudar. Um minutinho só que alguém assume daqui.",
+  "Tô te encaminhando pra um atendente humano agora, tá bom? É rapidinho.",
+  "Combinado, um atendente já vai continuar contigo. Aguenta só um instante.",
+]
+function escolherMsgHandoff(): string {
+  return MSGS_HANDOFF[Math.floor(Math.random() * MSGS_HANDOFF.length)]
+}
+
+// Dedupe de retry do webhook: se o MTalk reenviar o MESMO evento (ex.: timeout de rede
+// do lado dele), não queremos gerar/enviar a resposta de novo — outra fonte de texto
+// duplicado saindo para o cliente.
+const DEDUPE_JANELA_MS = 15_000
+function hashMensagem(msg: string): string {
+  return createHash("sha1").update(msg.trim().toLowerCase()).digest("hex").slice(0, 16)
+}
 
 export async function POST(request: Request) {
   let raw: Record<string, unknown>
@@ -107,7 +128,7 @@ export async function POST(request: Request) {
       summary: `Cliente: ${contactName}. Última mensagem: "${textoUsuario.slice(0, 280)}".`,
       reason: motivo,
     }).catch(() => undefined)
-    return { texto: MSG_HANDOFF }
+    return { texto: escolherMsgHandoff() }
   }
 
   // Núcleo: produz o TEXTO da resposta (memória + escalação). Separado do envio HTTP
@@ -193,6 +214,18 @@ export async function POST(request: Request) {
 
   if (!mensagem) return mtalkError("Não recebi nenhuma mensagem. Pode tentar novamente?")
 
+  // Dedupe de retry do webhook: MESMO ticket + MESMO texto dentro de uma janela curta
+  // = o MTalk reenviando o evento (não o cliente repetindo a pergunta minutos depois).
+  // Sem isso, um retry gera uma segunda resposta idêntica saindo pro cliente.
+  const msgHash = hashMensagem(mensagem)
+  const agoraMs = Date.now()
+  if (conversa.ultimaMsgHash === msgHash && conversa.ultimaMsgEm && agoraMs - conversa.ultimaMsgEm < DEDUPE_JANELA_MS) {
+    logger.warn("mtalk_mensagem_duplicada_ignorada", { ticketId, msgHash })
+    return mtalkSilencio()
+  }
+  conversa.ultimaMsgHash = msgHash
+  conversa.ultimaMsgEm = agoraMs
+
   // ── TEXTO ────────────────────────────────────────────────────────────────
   // Persiste em background para o RAG (não bloqueia a resposta)
   const baseUrl = process.env.INTERNAL_BASE_URL || new URL(request.url).origin
@@ -242,6 +275,9 @@ export async function POST(request: Request) {
   ])
 
   if (corrida.pronto) {
+    // Atraso curto: responder no exato milissegundo em que a mensagem chega é
+    // outro sinal de robô que os detectores de spam do WhatsApp observam.
+    await jitterHumano(300, 900)
     return mtalkResponse(corrida.texto)
   }
 
@@ -250,6 +286,10 @@ export async function POST(request: Request) {
   after(async () => {
     try {
       const { texto } = await gen
+      // Pacing de saída: espera uma vaga na janela de envios/min + atraso humano,
+      // pra não empilhar mensagens em rajada (assinatura de disparo em massa).
+      await aguardarVagaEnvio("mtalk")
+      await jitterHumano(600, 2000)
       await enviarRespostaParaMTalk({ number: contactId, content: comCabecalhoMavo(texto) })
       logger.info("mtalk_reply_async_enviado", { ticketId })
     } catch (e) {

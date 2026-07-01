@@ -70,6 +70,8 @@ interface StatsResponse {
   por_status: Record<string, number>
   total: number
   ultimos: Array<{ id: string; pergunta: string; status: string; updated_at: string }>
+  mais_usados: Array<{ id: string; pergunta: string; uso_count: number; ultimo_uso_at: string | null }>
+  publicados_sem_uso: number
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -142,6 +144,37 @@ function DashboardArea() {
                           {STATUS_LABEL[u.status] ?? u.status}
                         </Badge>
                         <span className="text-[11px] text-muted-foreground">{fmtDate(u.updated_at)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Uso do conhecimento publicado</CardTitle>
+              <CardDescription>
+                Quantas vezes cada item entrou de fato numa resposta real da IA.
+                {(data?.publicados_sem_uso ?? 0) > 0 && (
+                  <> <strong>{data!.publicados_sem_uso}</strong> item(ns) publicado(s) nunca foi usado — revise palavras-chave ou arquive.</>
+                )}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {(data?.mais_usados?.length ?? 0) === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  Nenhum conhecimento publicado foi usado ainda numa resposta real.
+                </p>
+              ) : (
+                <div className="flex flex-col divide-y">
+                  {data!.mais_usados.map((u) => (
+                    <div key={u.id} className="flex items-center justify-between gap-3 py-2.5">
+                      <span className="min-w-0 truncate text-sm">{u.pergunta}</span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Badge variant="secondary" className="text-[11px] tabular-nums">{u.uso_count}x usado</Badge>
+                        <span className="text-[11px] text-muted-foreground">último uso: {fmtDate(u.ultimo_uso_at)}</span>
                       </div>
                     </div>
                   ))}
@@ -448,6 +481,143 @@ function ListaArea({ statuses, titulo, descricao }: { statuses: Status[]; titulo
   )
 }
 
+// ─── Sandbox / Modo Comparativo ─────────────────────────────────────────────────
+
+interface SandboxResult {
+  pergunta: string
+  respostaAtual: string
+  respostaComItem: string
+  casosUsadosAtual: number
+  casosUsadosComItem: number
+}
+
+function SandboxArea() {
+  const { data } = useSWR<{ data: KnowledgeItem[]; total: number }>(
+    "/api/manager/curation/items?status=todos&limit=50",
+    fetcher,
+    { revalidateOnFocus: false },
+  )
+  const candidatos = (data?.data ?? []).filter((i) => i.status === "rascunho" || i.status === "em_teste")
+
+  const [selecionadoId, setSelecionadoId] = useState("")
+  const [perguntaTeste, setPerguntaTeste] = useState("")
+  const [rodando, setRodando] = useState(false)
+  const [resultado, setResultado] = useState<SandboxResult | null>(null)
+  const [erro, setErro] = useState<string | null>(null)
+
+  const item = candidatos.find((c) => c.id === selecionadoId)
+
+  const comparar = async () => {
+    if (!selecionadoId) return
+    setRodando(true)
+    setErro(null)
+    setResultado(null)
+    try {
+      const res = await fetch(`/api/manager/curation/items/${selecionadoId}/sandbox`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(perguntaTeste.trim() ? { pergunta: perguntaTeste.trim() } : {}),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(j.detail || j.error || `status ${res.status}`)
+      setResultado(j.data)
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Não foi possível rodar a comparação.")
+    } finally {
+      setRodando(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FlaskConical className="h-5 w-5 text-blue-600" />
+            Sandbox — testar antes de publicar
+          </CardTitle>
+          <CardDescription>
+            Compara lado a lado a resposta que a IA dá <strong>hoje</strong> (sem este conhecimento) com a resposta
+            <strong> se você publicar</strong> este item. Nada aqui afeta produção — é só simulação.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {candidatos.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Não há nada em rascunho ou em teste pra comparar. Capture algo primeiro em <strong>Capturar</strong>.
+            </p>
+          ) : (
+            <>
+              <div className="grid gap-1.5">
+                <label className="text-sm font-medium">Conhecimento candidato</label>
+                <select
+                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                  value={selecionadoId}
+                  onChange={(e) => { setSelecionadoId(e.target.value); setResultado(null); setErro(null) }}
+                >
+                  <option value="">Selecione...</option>
+                  {candidatos.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      [{STATUS_LABEL[c.status]}] {c.pergunta.slice(0, 80)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-1.5">
+                <label className="text-sm font-medium">Pergunta de teste (opcional)</label>
+                <Textarea
+                  placeholder={item ? `Padrão: "${item.pergunta}" — ou digite uma variação de como o cliente perguntaria` : "Selecione um item acima primeiro"}
+                  value={perguntaTeste}
+                  onChange={(e) => setPerguntaTeste(e.target.value)}
+                  className="min-h-16"
+                  disabled={!selecionadoId}
+                />
+              </div>
+              <div>
+                <Button onClick={comparar} disabled={!selecionadoId || rodando} className="gap-2">
+                  {rodando ? <Spinner className="h-4 w-4" /> : <FlaskConical className="h-4 w-4" />}
+                  Comparar respostas
+                </Button>
+              </div>
+            </>
+          )}
+
+          {erro && (
+            <div className="flex items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-700 dark:bg-red-950 dark:text-red-200">
+              <AlertTriangle className="h-4 w-4" /> {erro}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {resultado && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm text-muted-foreground">Resposta ATUAL (sem publicar)</CardTitle>
+              <CardDescription className="text-[11px]">{resultado.casosUsadosAtual} caso(s) de contexto usado(s)</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="whitespace-pre-wrap rounded-lg bg-muted/40 p-3 text-sm">{resultado.respostaAtual}</p>
+            </CardContent>
+          </Card>
+          <Card className="border-emerald-300 dark:border-emerald-800">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-300">
+                <CheckCircle2 className="h-4 w-4" /> Resposta SE PUBLICAR este item
+              </CardTitle>
+              <CardDescription className="text-[11px]">{resultado.casosUsadosComItem} caso(s) de contexto usado(s), incluindo o candidato</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="whitespace-pre-wrap rounded-lg bg-emerald-50 p-3 text-sm dark:bg-emerald-950/40">{resultado.respostaComItem}</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Placeholder de áreas futuras ───────────────────────────────────────────────
 
 function EmBreve({ area, fase, descricao }: { area: string; fase: string; descricao: string }) {
@@ -528,13 +698,7 @@ export function CurationModule() {
               descricao="Conhecimento ativo que a IA usa em produção. Arquive o que ficar desatualizado."
             />
           </TabsContent>
-          <TabsContent value="sandbox">
-            <EmBreve
-              area="Simulador (Sandbox) + Modo Comparativo"
-              fase="Próxima fase"
-              descricao="Testar o conhecimento em teste num chat isolado e comparar lado a lado a resposta de produção vs. a nova, antes de publicar."
-            />
-          </TabsContent>
+          <TabsContent value="sandbox"><SandboxArea /></TabsContent>
           <TabsContent value="versoes">
             <EmBreve
               area="Histórico de Versões"

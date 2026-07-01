@@ -14,6 +14,7 @@ import { buscarSemantica } from "@/lib/semantic-search"
 import { sanitizePII } from "@/lib/pii-sanitizer"
 import { query } from "@/lib/database/postgres-client-no-vector"
 import { logger } from "@/lib/logger"
+import { createKnowledgeItem } from "@/lib/knowledge-curation"
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -204,6 +205,33 @@ export async function curarConversa(
     const id = result.rows[0]?.id ?? crypto.randomUUID()
 
     logger.info("ai_curator_ok", { id, tenantId, conversationId, recurrence_alert })
+
+    // Captura automática 100% (Fase 2 da Curadoria): todo atendimento encerrado que passa
+    // por aqui também vira um RASCUNHO em knowledge_items, pronto pra revisão do gerente —
+    // antes disso, a "dobradinha" dependia do gerente digitar manualmente. Best-effort: uma
+    // falha aqui não pode derrubar a curadoria em `atendimentos` (que já foi concluída acima).
+    if (parsed.resumo_problema.trim().length >= 5) {
+      try {
+        await createKnowledgeItem({
+          tenant_id: tenantId,
+          pergunta: parsed.resumo_problema,
+          intencao: parsed.causa,
+          categoria: parsed.categoria,
+          palavras_chave: parsed.tags ?? [],
+          resposta_oficial: parsed.solucao,
+          status: "rascunho",
+          criador: "auto-encerramento",
+          origem_conversa_id: conversationId,
+          origem_atendimento_id: id,
+        })
+      } catch (e) {
+        logger.warn("captura_automatica_knowledge_falhou", {
+          conversationId,
+          tenantId,
+          error: e instanceof Error ? e.message : String(e),
+        })
+      }
+    }
 
     return {
       id,

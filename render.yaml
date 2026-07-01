@@ -50,8 +50,10 @@ services:
         sync: false
 
       # Supabase Auth
+      # Corrigido 2026-07-01: valor antigo (wakvnakntdynfkevqlxh) estava desatualizado —
+      # o projeto real em uso é xicghwmrsqbyuhhcgrnu (mesmo do DATABASE_URL de produção).
       - key: NEXT_PUBLIC_SUPABASE_URL
-        value: https://wakvnakntdynfkevqlxh.supabase.co
+        value: https://xicghwmrsqbyuhhcgrnu.supabase.co
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
@@ -60,6 +62,10 @@ services:
       # MTalk
       - key: MTALK_BASE_URL
         value: https://s11.mtalk.com.br
+      # Teto de envios/min pro anti-spam (ver lib/outbound-throttle.ts) — reduz o
+      # padrão de disparo em massa que gerou a restrição de conta em 2026-06-30.
+      - key: MTALK_OUTBOUND_MAX_PER_MIN
+        value: "20"
       - key: MTALK_AUTO_REPLY_ENABLED
         value: "true"
       - key: MTALK_ACCOUNT_ID
@@ -84,6 +90,10 @@ services:
       - key: ADMIN_PASSWORD
         sync: false
       - key: ADMIN_SESSION_SECRET
+        sync: false
+      # Senha do Gerente de Curadoria — acessa só /manager/ai-curation. Sem ela,
+      # a rota fica inacessível (managerPasswordConfigured() = false).
+      - key: MANAGER_PASSWORD
         sync: false
       - key: API_RATE_LIMIT_PER_MINUTE
         value: "60"

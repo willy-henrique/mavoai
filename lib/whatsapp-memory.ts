@@ -19,6 +19,10 @@ export type WhatsAppConversa = {
   messages: ChatTurn[]
   /** true = já foi transferida para um atendente humano; o bot para de responder. */
   handoff: boolean
+  /** Hash (não o texto puro) da última mensagem de texto processada — usado para dedupe de retry do webhook. */
+  ultimaMsgHash?: string
+  /** Epoch ms de quando `ultimaMsgHash` foi processado. */
+  ultimaMsgEm?: number
 }
 
 const TENANT = "default"
@@ -43,6 +47,8 @@ export async function carregarConversa(ticketId: string): Promise<WhatsAppConver
     return {
       messages: Array.isArray(s?.messages) ? (s!.messages as ChatTurn[]) : [],
       handoff: !!s?.handoff,
+      ultimaMsgHash: typeof s?.ultimaMsgHash === "string" ? s.ultimaMsgHash : undefined,
+      ultimaMsgEm: typeof s?.ultimaMsgEm === "number" ? s.ultimaMsgEm : undefined,
     }
   } catch (e) {
     logger.warn("wa_memory_load_error", { ticketId, error: e instanceof Error ? e.message : String(e) })
@@ -56,6 +62,8 @@ export async function salvarConversa(ticketId: string, conversa: WhatsAppConvers
   const enxuta: WhatsAppConversa = {
     messages: conversa.messages.slice(-MAX_TURNS),
     handoff: conversa.handoff,
+    ultimaMsgHash: conversa.ultimaMsgHash,
+    ultimaMsgEm: conversa.ultimaMsgEm,
   }
   try {
     await query(

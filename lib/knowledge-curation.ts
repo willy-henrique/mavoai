@@ -10,7 +10,8 @@
  */
 
 import { query } from "@/lib/database/postgres-client-no-vector"
-import { gerarTextoIACurador } from "@/lib/ai-provider"
+import { gerarTextoIACurador, gerarEmbeddingIA } from "@/lib/ai-provider"
+import { embeddingParaVector } from "@/lib/embeddings"
 import { sanitizePII } from "@/lib/pii-sanitizer"
 import { logger } from "@/lib/logger"
 
@@ -42,6 +43,8 @@ export interface KnowledgeItem {
   revisor: string | null
   origem_conversa_id: string | null
   origem_atendimento_id: string | null
+  uso_count: number
+  ultimo_uso_at: string | null
   created_at: string
   updated_at: string
   published_at: string | null
@@ -49,7 +52,8 @@ export interface KnowledgeItem {
 
 const SELECT_COLS = `id, tenant_id, pergunta, intencao, categoria, tags, palavras_chave,
   resposta_oficial, resposta_alternativa, exemplos, confianca, prioridade, status, versao,
-  criador, revisor, origem_conversa_id, origem_atendimento_id, created_at, updated_at, published_at`
+  criador, revisor, origem_conversa_id, origem_atendimento_id, uso_count, ultimo_uso_at,
+  created_at, updated_at, published_at`
 
 // ─── Leitura ──────────────────────────────────────────────────────────────────
 
@@ -100,6 +104,27 @@ export async function listKnowledgeItems(params: {
 export async function getKnowledgeItem(id: string): Promise<KnowledgeItem | null> {
   const res = await query(`SELECT ${SELECT_COLS} FROM public.knowledge_items WHERE id = $1`, [id])
   return (res.rows[0] as KnowledgeItem) ?? null
+}
+
+/**
+ * Gera e grava o embedding do item (Fase 2 da Curadoria) — só assim o conteúdo
+ * publicado entra na busca vetorial do RAG (ver `buscar_knowledge_semantico` em
+ * scripts/015_knowledge_semantic_search.sql e `lib/semantic-search.ts`).
+ * Best-effort: uma falha aqui não deve derrubar a publicação/edição do item.
+ */
+async function reindexarEmbedding(item: KnowledgeItem): Promise<void> {
+  try {
+    const texto = [item.pergunta, item.palavras_chave.join(", "), item.resposta_oficial]
+      .filter(Boolean)
+      .join("\n")
+    const embedding = await gerarEmbeddingIA(texto, "retrieval.passage")
+    await query(`UPDATE public.knowledge_items SET embedding = $1::vector WHERE id = $2`, [
+      embeddingParaVector(embedding),
+      item.id,
+    ])
+  } catch (e) {
+    logger.warn("knowledge_item_embedding_falhou", { id: item.id, error: e instanceof Error ? e.message : String(e) })
+  }
 }
 
 // ─── Escrita ──────────────────────────────────────────────────────────────────
@@ -190,7 +215,10 @@ export async function updateKnowledgeItem(
      RETURNING ${SELECT_COLS}`,
     args,
   )
-  return (res.rows[0] as KnowledgeItem) ?? null
+  const item = (res.rows[0] as KnowledgeItem) ?? null
+  // Item já publicado + conteúdo mudou → reindexar, senão a busca fica com embedding velho.
+  if (item && mudouConteudo && item.status === "publicado") await reindexarEmbedding(item)
+  return item
 }
 
 /** Transição de status com regras (publicar carimba published_at + revisor). */
@@ -208,7 +236,10 @@ export async function transitionStatus(
     [novo, revisor ?? null, id],
   )
   const item = (res.rows[0] as KnowledgeItem) ?? null
-  if (item) logger.info("knowledge_item_status", { id, status: novo, revisor: revisor ?? null })
+  if (item) {
+    logger.info("knowledge_item_status", { id, status: novo, revisor: revisor ?? null })
+    if (novo === "publicado") await reindexarEmbedding(item)
+  }
   return item
 }
 
@@ -284,17 +315,32 @@ export interface CurationStats {
   por_status: Record<string, number>
   total: number
   ultimos: Array<{ id: string; pergunta: string; status: string; updated_at: string }>
+  /** Publicados mais usados em respostas reais (RAG) — indica o que está de fato ajudando a IA. */
+  mais_usados: Array<{ id: string; pergunta: string; uso_count: number; ultimo_uso_at: string | null }>
+  /** Nº de itens publicados que nunca foram usados numa resposta real — candidatos a revisar/arquivar. */
+  publicados_sem_uso: number
 }
 
 export async function curationStats(tenantId?: string): Promise<CurationStats> {
   const where = tenantId ? `WHERE tenant_id = $1` : ""
+  const wherePublicado = tenantId ? `WHERE tenant_id = $1 AND status = 'publicado'` : `WHERE status = 'publicado'`
   const args = tenantId ? [tenantId] : []
   try {
-    const [statusRes, ultimosRes] = await Promise.all([
+    const [statusRes, ultimosRes, maisUsadosRes, semUsoRes] = await Promise.all([
       query(`SELECT status, COUNT(*)::int AS n FROM public.knowledge_items ${where} GROUP BY status`, args),
       query(
         `SELECT id, pergunta, status, updated_at FROM public.knowledge_items ${where}
          ORDER BY updated_at DESC LIMIT 8`,
+        args,
+      ),
+      query(
+        `SELECT id, pergunta, uso_count, ultimo_uso_at FROM public.knowledge_items
+         ${wherePublicado} AND uso_count > 0
+         ORDER BY uso_count DESC LIMIT 8`,
+        args,
+      ),
+      query(
+        `SELECT COUNT(*)::int AS n FROM public.knowledge_items ${wherePublicado} AND uso_count = 0`,
         args,
       ),
     ])
@@ -304,8 +350,14 @@ export async function curationStats(tenantId?: string): Promise<CurationStats> {
       por_status[r.status] = r.n
       total += r.n
     }
-    return { por_status, total, ultimos: ultimosRes.rows as CurationStats["ultimos"] }
+    return {
+      por_status,
+      total,
+      ultimos: ultimosRes.rows as CurationStats["ultimos"],
+      mais_usados: maisUsadosRes.rows as CurationStats["mais_usados"],
+      publicados_sem_uso: Number(semUsoRes.rows[0]?.n || 0),
+    }
   } catch {
-    return { por_status: {}, total: 0, ultimos: [] }
+    return { por_status: {}, total: 0, ultimos: [], mais_usados: [], publicados_sem_uso: 0 }
   }
 }

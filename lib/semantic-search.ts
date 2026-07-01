@@ -8,9 +8,16 @@ export interface ResultadoSemantico {
   resumo_problema: string
   causa: string | null
   solucao: string | null
-  estrategia?: "vetorial" | "textual"
+  estrategia?: "vetorial" | "textual" | "curado"
   score_lexical?: number
 }
+
+/**
+ * Conteúdo validado pelo Gerente de Curadoria (knowledge_items, status='publicado')
+ * ganha um pequeno reforço no score — é conhecimento revisado por humano, não um
+ * caso histórico bruto. O reforço é proporcional à confiança que o gerente marcou.
+ */
+const CURADO_BOOST_MAX = 0.08
 
 function normalizarTermosBusca(texto: string): string[] {
   const unique = new Set(
@@ -63,6 +70,23 @@ function solucaoInutil(s: string | null): boolean {
   return /n[aã]o\s+(aplic|foi\s+poss[ií]vel|detalh|informad|identific|h[aá]\s+solu|consta)/.test(t)
 }
 
+/**
+ * Estatística de uso do conhecimento curado (Fase 2+ da Curadoria): toda vez que um
+ * knowledge_item PUBLICADO entra de fato numa resposta real, incrementa o contador —
+ * é o que alimenta o card "mais usados" no Dashboard do gerente. Fire-and-forget:
+ * não atrasa a resposta ao cliente nem derruba o RAG se o UPDATE falhar.
+ */
+function registrarUsoKnowledge(resultados: ResultadoSemantico[]): void {
+  const ids = resultados.filter((r) => r.estrategia === "curado").map((r) => r.id)
+  if (ids.length === 0) return
+  query(
+    `UPDATE public.knowledge_items SET uso_count = uso_count + 1, ultimo_uso_at = NOW() WHERE id = ANY($1::uuid[])`,
+    [ids],
+  ).catch((e) => {
+    logger.warn("knowledge_uso_registro_falhou", { error: e instanceof Error ? e.message : String(e) })
+  })
+}
+
 export async function buscarSemantica(
   texto: string,
   limite = 3,
@@ -73,10 +97,20 @@ export async function buscarSemantica(
     const vector = embeddingParaVector(embedding)
     // Busca mais do que o necessário para poder descartar casos sem solução útil.
     const overfetch = Math.min(Math.max(limite * 4, 12), 40)
-    const result = await query(
-      "SELECT * FROM buscar_atendimentos_semanticos($1::vector, $2::int, $3::text)",
-      [vector, overfetch, tenantId ?? null]
-    )
+    const [result, curadoResult] = await Promise.all([
+      query(
+        "SELECT * FROM buscar_atendimentos_semanticos($1::vector, $2::int, $3::text)",
+        [vector, overfetch, tenantId ?? null]
+      ),
+      query(
+        "SELECT * FROM buscar_knowledge_semantico($1::vector, $2::int, $3::text)",
+        [vector, Math.min(limite * 2, 10), tenantId ?? null]
+      ).catch((e) => {
+        // Função/tabela pode não existir ainda (migration 015 não rodada) — degrada normalmente.
+        logger.warn("busca_knowledge_indisponivel", { error: e instanceof Error ? e.message : String(e) })
+        return { rows: [] as any[] }
+      }),
+    ])
 
     if (Array.isArray(result.rows)) {
       const termos = normalizarTermosBusca(texto)
@@ -98,11 +132,31 @@ export async function buscarSemantica(
             score_lexical: scoreLex,
           }
         })
-        .sort((a, b) => b.similaridade - a.similaridade)
+
+      const curados = (curadoResult.rows || []).map((row: any) => {
+        const base = [row.resumo_problema, row.causa, row.solucao].filter(Boolean).join(" ")
+        const scoreLex = calcularScoreLexical(base, termos)
+        const scoreVet = Number(row.similaridade ?? 0)
+        const scoreHibrid = scoreVet * 0.7 + scoreLex * 0.3
+        const boost = CURADO_BOOST_MAX * Number(row.confianca ?? 0.8)
+        return {
+          id: row.id,
+          similaridade: Math.min(1, scoreHibrid + boost),
+          resumo_problema: row.resumo_problema || "",
+          causa: row.causa ?? null,
+          solucao: row.solucao ?? null,
+          estrategia: "curado" as const,
+          score_lexical: scoreLex,
+        }
+      })
+
+      const combinado = [...mapped, ...curados].sort((a, b) => b.similaridade - a.similaridade)
 
       // Prioriza casos COM solução real; só cai nos vazios se não sobrar nada.
-      const uteis = mapped.filter((r) => !solucaoInutil(r.solucao))
-      return (uteis.length > 0 ? uteis : mapped).slice(0, limite)
+      const uteis = combinado.filter((r) => !solucaoInutil(r.solucao))
+      const finalResult = (uteis.length > 0 ? uteis : combinado).slice(0, limite)
+      registrarUsoKnowledge(finalResult)
+      return finalResult
     }
   } catch (error) {
     logger.warn("busca_vetorial_indisponivel", {
