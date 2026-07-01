@@ -30,6 +30,7 @@ import {
   pediuHumano,
   SYSTEM_PROMPT_WHATSAPP,
 } from "@/lib/assisted-response"
+import { isEscalationSignal } from "@/lib/escalation-detector"
 import { analisarImagemIA, transcreverAudioIA } from "@/lib/ai-provider"
 import { enviarRespostaParaMTalk } from "@/lib/mtalk-reply"
 import {
@@ -182,6 +183,14 @@ export async function POST(request: Request) {
   // ── IMAGEM: analisa com visão do Llama 4 Scout ───────────────────────────
   if (messageType === "image") {
     if (!mediaUrl) return mtalkError("Não consegui acessar a imagem. Pode descrever o problema?")
+    // Se a legenda da imagem já pede um humano ("isso não resolveu, quero atendente"),
+    // transfere ANTES de gastar a visão — mesmo comportamento do caminho de texto.
+    // Sem isso, o cliente que anexa print + pedido de humano era ignorado (a visão
+    // só respondia sobre a imagem e nunca acionava o handoff).
+    if (mensagem && pediuHumano(mensagem)) {
+      const { texto } = await transferirParaHumano(mensagem ? `[imagem] ${mensagem}` : "[enviou uma imagem]", "cliente_pediu_humano")
+      return mtalkResponse(texto)
+    }
     try {
       // Contexto da conversa para a visão NÃO responder no vácuo: passamos o
       // histórico recente + a legenda que o cliente mandou junto da imagem.
@@ -193,13 +202,25 @@ export async function POST(request: Request) {
         SYSTEM_PROMPT_WHATSAPP +
         (conversa.messages.length
           ? `\n\nVocê JÁ está no meio de uma conversa com este cliente — NÃO se reapresente, NÃO comece a resposta com "Mavo AI", e NÃO descreva a imagem de forma genérica. Interprete a imagem DENTRO do contexto da conversa abaixo e continue o raciocínio de onde parou.\n\n=== CONVERSA ATÉ AGORA ===\n${historicoRecente}`
-          : "\n\nComente o que vê na imagem e ajude como suporte técnico.")
+          : "\n\nComente o que vê na imagem e ajude como suporte técnico.") +
+        // Escalação também no caminho de imagem: se a visão não conseguir identificar
+        // o problema pela tela (imagem ilegível, fora de contexto, ou algo que exige
+        // humano), pode acionar o técnico em vez de inventar uma leitura da imagem.
+        `\n\nSe você NÃO conseguir entender a tela/erro da imagem com segurança, ou se ela fugir do suporte técnico do Auge, responda APENAS com o token [ESCALAR_HUMANO] (nada mais). Não invente o que está na imagem se não estiver claro.`
       const legenda = mensagem
         ? `O cliente enviou esta imagem com a legenda: "${mensagem}". Use a legenda E o contexto da conversa para entender o que ele quer e responda conectando a imagem ao que já estavam falando.`
         : "O cliente enviou esta imagem. Conecte o que aparece nela ao contexto da conversa e ajude — não descreva de forma genérica."
       const resposta = await analisarImagemIA(mediaUrl, contexto, legenda)
+
+      // A visão pediu escalação → transfere pro humano em vez de mandar o token cru.
+      if (isEscalationSignal(resposta)) {
+        const { texto } = await transferirParaHumano(mensagem ? `[imagem] ${mensagem}` : "[enviou uma imagem]", "ia_nao_resolveu_imagem")
+        return mtalkResponse(texto)
+      }
+
       conversa.messages.push({ role: "user", content: mensagem ? `[imagem] ${mensagem}` : "[enviou uma imagem]" })
       conversa.messages.push({ role: "assistant", content: resposta })
+      conversa.ultimaRespostaTexto = resposta
       await salvarConversa(ticketId, conversa)
       logger.info("mtalk_resposta_ok", { ticketId, tipo: "image", len: resposta.length })
       return mtalkResponse(resposta)
